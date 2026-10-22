@@ -35,8 +35,17 @@ JPY,Yen,0
 ```
 
 `op.load_static_data(table_name, csv_path, natural_keys, schema=None, *, delete_missing=False,
-track_checksum=True, version_table_name="static_data_version")`:
+track_checksum=True, version_table_name="static_data_version", environment_column=None,
+environment_key="env", require_unique=True)`:
 
+- **The natural keys must identify at most one row, and the table has to prove it.** The load refuses
+  unless a primary key, `UniqueConstraint` or unique `Index` is covered by the natural keys, because the
+  upsert's `UPDATE ... WHERE <keys>` would otherwise overwrite every matching row while reporting one. A
+  unique key only has to be a *subset* of the natural keys: uniqueness on `code` justifies
+  `natural_keys=["code", "name"]`, but a unique constraint on `(code, name)` does **not** justify
+  `natural_keys=["code"]`. `require_unique=False` opts out, for schemas where uniqueness is enforced
+  somewhere this cannot see.
+- A single natural key may be given as a plain string: `natural_keys="code"`.
 - Rows whose natural key is not in the table are **inserted**.
 - Rows whose natural key exists and whose non-key values differ are **updated** (only the changed columns).
 - Identical rows are left alone, so running it again changes nothing (idempotent).

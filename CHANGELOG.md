@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-22 — #11 → PR #12: refuse to load unless the table guarantees the `natural_keys` match at most one row (`require_unique=False` opts out), and accept a single natural key as a plain string
+
 - 2026-10-22 — #9 → PR #10: load a per-environment subset of one CSV via an environment column, with the environment taken from `alembic -x env=…` and made part of the checksum key
 
 - 2026-10-22 — #4 → PR #5: add `op.forget_static_data()` so a `downgrade()` can delete the recorded checksum, which otherwise outlives the data and makes the next upgrade skip the reload

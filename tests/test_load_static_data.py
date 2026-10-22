@@ -151,6 +151,8 @@ def test_composite_natural_key(op, connection, write_csv) -> None:
         sa.Column("country", sa.String(2), nullable=False),
         sa.Column("kind", sa.String(10), nullable=False),
         sa.Column("pct", sa.Float, nullable=False),
+        # The surrogate id does not make (country, kind) unique, and the load now insists that it is.
+        sa.UniqueConstraint("country", "kind"),
     )
     keys = ["country", "kind"]
     op.load_static_data("rate", write_csv("country,kind,pct\nDE,vat,19\nDE,reduced,7\nFR,vat,20\n", "rate.csv"), keys)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -30,6 +31,7 @@ from alembic_static_data.tracking import version_table
 from alembic_static_data.tracking import version_table_exists
 from alembic_static_data.upsert import UpsertResult
 from alembic_static_data.upsert import check_columns
+from alembic_static_data.upsert import check_natural_keys_unique
 from alembic_static_data.upsert import coerce_row
 from alembic_static_data.upsert import delete_missing_rows
 from alembic_static_data.upsert import upsert_rows
@@ -63,7 +65,7 @@ class LoadStaticDataOp(MigrateOperation):
         self,
         table_name: str,
         csv_path: str | Path,
-        natural_keys: list[str],
+        natural_keys: str | Sequence[str],
         schema: str | None = None,
         *,
         delete_missing: bool = False,
@@ -71,16 +73,20 @@ class LoadStaticDataOp(MigrateOperation):
         version_table_name: str = DEFAULT_VERSION_TABLE,
         environment_column: str | None = None,
         environment_key: str = DEFAULT_ENVIRONMENT_KEY,
+        require_unique: bool = True,
     ) -> None:
         self.table_name = table_name
         self.csv_path = csv_path
-        self.natural_keys = list(natural_keys)
+        # A bare string is the common single-key case. Without this it would iterate into characters and
+        # report a nonsensical ['c', 'o', 'd', 'e'].
+        self.natural_keys = [natural_keys] if isinstance(natural_keys, str) else list(natural_keys)
         self.schema = schema
         self.delete_missing = delete_missing
         self.track_checksum = track_checksum
         self.version_table_name = version_table_name
         self.environment_column = environment_column
         self.environment_key = environment_key
+        self.require_unique = require_unique
 
     @classmethod
     def load_static_data(
@@ -88,7 +94,7 @@ class LoadStaticDataOp(MigrateOperation):
         operations: Operations,
         table_name: str,
         csv_path: str | Path,
-        natural_keys: list[str],
+        natural_keys: str | Sequence[str],
         schema: str | None = None,
         *,
         delete_missing: bool = False,
@@ -96,12 +102,14 @@ class LoadStaticDataOp(MigrateOperation):
         version_table_name: str = DEFAULT_VERSION_TABLE,
         environment_column: str | None = None,
         environment_key: str = DEFAULT_ENVIRONMENT_KEY,
+        require_unique: bool = True,
     ) -> UpsertResult | None:
         """Issue ``op.load_static_data(table_name, csv_path, natural_keys)`` from a migration script.
 
         :param table_name: existing table to load into.
         :param csv_path: CSV file with a header row; header names must be column names of the table.
-        :param natural_keys: columns identifying a row; must be in the CSV header and in the table.
+        :param natural_keys: columns identifying a row; must be in the CSV header and in the table. A single
+            column may be given as a plain string.
         :param schema: optional schema of the table, also used for the checksum table.
         :param delete_missing: when true, delete table rows whose natural key is absent from the CSV.
             Off by default: the operation otherwise never deletes anything.
@@ -114,6 +122,9 @@ class LoadStaticDataOp(MigrateOperation):
             upsert. Rows for other environments are ignored entirely, so the same natural key may appear
             once per environment.
         :param environment_key: the ``-x`` key the environment is read from, i.e. ``alembic -x env=prod``.
+        :param require_unique: when true (the default), refuse to load unless the table guarantees that the
+            natural keys match at most one row. Set it to false only when uniqueness is enforced somewhere
+            this cannot see, such as a partial index - the upsert then may overwrite several rows per CSV row.
         """
         operation = cls(
             table_name,
@@ -125,6 +136,7 @@ class LoadStaticDataOp(MigrateOperation):
             version_table_name=version_table_name,
             environment_column=environment_column,
             environment_key=environment_key,
+            require_unique=require_unique,
         )
         return cast("UpsertResult | None", operations.invoke(operation))
 
@@ -218,6 +230,7 @@ def load_static_data(operations: Operations, operation: LoadStaticDataOp) -> Ups
             delete_missing=operation.delete_missing,
             environment_column=operation.environment_column,
             environment=environment,
+            require_unique=operation.require_unique,
         )
 
     # Checksum first: a missing file must fail the same way whether or not tracking is on.
@@ -244,6 +257,7 @@ def load_static_data(operations: Operations, operation: LoadStaticDataOp) -> Ups
         delete_missing=operation.delete_missing,
         environment_column=operation.environment_column,
         environment=environment,
+        require_unique=operation.require_unique,
     )
     record_load(
         connection,
@@ -266,6 +280,7 @@ def apply_static_data(
     delete_missing: bool = False,
     environment_column: str | None = None,
     environment: str | None = None,
+    require_unique: bool = True,
 ) -> UpsertResult:
     """Validate the CSV against ``table`` and upsert it; shared by the operation and directly testable.
 
@@ -280,6 +295,8 @@ def apply_static_data(
         header, raw_rows = select_environment_rows(header, raw_rows, environment_column, environment, csv_path)
     check_natural_keys_in_header(header, natural_keys, csv_path)
     check_columns(table, header, natural_keys)
+    if require_unique:
+        check_natural_keys_unique(table, natural_keys)
     # After filtering on purpose: the same natural key may appear once per environment, which is only a
     # duplicate if two of those rows apply to the environment being loaded.
     check_unique_keys(raw_rows, natural_keys, csv_path)
