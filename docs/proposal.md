@@ -71,6 +71,10 @@ Alembic does offer a per-step hook (`EnvironmentContext.configure(on_version_app
 revision step rather than once per upgrade, so it does not give Flyway's "run repeatables at the end"
 semantics anyway.
 
+**5a. Environments select rows, not files.** Liquibase-style contexts in one reviewable file beat n copies
+of the same data: a diff shows every environment side by side, shared rows are written once, and the
+environment value rides on Alembic's existing `-x` mechanism rather than a new one.
+
 **5. The checksum describes the file, not the table.** A row edited by hand in the database stays edited
 until the CSV changes. This keeps the rule explainable in one sentence and avoids a `COUNT(*)` on every
 load. The cost is an explicit `op.forget_static_data()` in `downgrade()`, since otherwise the recorded
@@ -82,6 +86,9 @@ checksum outlives the data and a later upgrade skips the reload.
   version_table_name="static_data_version")` returning `UpsertResult(inserted, updated, unchanged, deleted,
   skipped)`.
 - `op.forget_static_data(table, csv=None, ...)` — the inverse of the bookkeeping, for `downgrade()`.
+- Environment scoping: a CSV column names the environments each row belongs to, and the environment comes
+  from Alembic's `-x` argument. The environment is part of the checksum key, and the same natural key may
+  appear once per environment, which is how a row is overridden for dev.
 - `register_operations()` for Alembic 1.17, which has no plugin system, and `exclude_from_autogenerate` to
   keep `--autogenerate` from proposing a `drop_table` for the bookkeeping table.
 - Type coercion from CSV strings to each column's Python type; an empty cell becomes `NULL`.
@@ -96,8 +103,8 @@ checksum outlives the data and a later upgrade skips the reload.
 - **Autogenerate integration.** Nothing detects that a table's data drifted from a CSV; this is a
   migration-time operation only.
 - **Bulk loading.** One `SELECT` per row, as above.
-- **Environment scoping.** Flyway users often want different seed data per environment; here that is the
-  caller's problem (pass a different path).
+- **Per-environment files or base/overlay layering.** Environment scoping itself is supported, but through a
+  row filter in one file (see below), not through one file per environment.
 
 ## Open question: plugin or core?
 
@@ -126,6 +133,11 @@ A middle path: keep the plugin, and ask the maintainers only whether the *entry-
 ## Next steps
 
 1. Decide plugin vs. upstream proposal (this document's main open question).
-2. If upstream: open a discussion referencing #620, linking this document rather than restating it.
+2. If upstream: open a **GitHub Discussion in the `Ideas` category** of `sqlalchemy/alembic`, linking this
+   document rather than restating it. Verified 2026-10-22: the project sets `blank_issues_enabled: false`
+   and its issue-template config routes feature proposals to Discussions/`Ideas` ("Use this for initial
+   discussion for new features and suggestions"), with Gitter (`gitter.im/sqlalchemy/community`) for quick
+   questions. Commenting on #620 would be the wrong channel twice over — it is closed and was last touched
+   in February 2020.
 3. If plugin: pick a public name, publish, and document the Alembic version matrix prominently, since the
    loader behaviour changed twice within a year.

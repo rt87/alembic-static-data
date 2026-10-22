@@ -21,6 +21,11 @@ DEFAULT_VERSION_TABLE = "static_data_version"
 # MySQL caps a composite primary key at 3072 bytes, i.e. 768 utf8mb4 characters, so keep both key columns short.
 _TABLE_NAME_LENGTH = 128
 _CSV_PATH_LENGTH = 512
+_ENVIRONMENT_LENGTH = 64
+
+# Stored for an unscoped load. An empty string rather than NULL, because it is part of the primary key and
+# NULLs do not compare equal.
+UNSCOPED = ""
 
 
 def exclude_from_autogenerate(
@@ -86,6 +91,9 @@ def version_table(name: str = DEFAULT_VERSION_TABLE, schema: str | None = None) 
         sa.MetaData(),
         sa.Column("table_name", sa.String(_TABLE_NAME_LENGTH), primary_key=True),
         sa.Column("csv_path", sa.String(_CSV_PATH_LENGTH), primary_key=True),
+        # Part of the key: the same file loaded for a second environment selects different rows, so it must
+        # not be skipped just because the file's bytes are unchanged.
+        sa.Column("environment", sa.String(_ENVIRONMENT_LENGTH), primary_key=True),
         sa.Column("checksum", sa.String(64), nullable=False),
         sa.Column("rows", sa.Integer, nullable=False),
         sa.Column("applied_at", sa.DateTime, nullable=False),
@@ -103,21 +111,40 @@ def version_table_exists(connection: sa.Connection, name: str, schema: str | Non
     return sa.inspect(connection).has_table(name, schema=schema)
 
 
-def forget_load(connection: sa.Connection, versions: sa.Table, table_name: str, csv_key: str | None = None) -> int:
-    """Delete tracking rows for ``table_name``, or just the one for ``csv_key``; returns how many.
+def forget_load(
+    connection: sa.Connection,
+    versions: sa.Table,
+    table_name: str,
+    csv_key: str | None = None,
+    environment: str | None = None,
+) -> int:
+    """Delete tracking rows for ``table_name``, narrowed by ``csv_key`` and ``environment``; returns how many.
 
     The inverse of :func:`record_load`, so a ``downgrade()`` can make the next upgrade reload the file.
+    Leaving ``csv_key`` or ``environment`` as ``None`` means "every one of them".
     """
     where = [versions.c.table_name == table_name]
     if csv_key is not None:
         where.append(versions.c.csv_path == csv_key)
+    if environment is not None:
+        where.append(versions.c.environment == environment)
     return connection.execute(sa.delete(versions).where(*where)).rowcount
 
 
-def stored_checksum(connection: sa.Connection, versions: sa.Table, table_name: str, csv_key: str) -> str | None:
-    """The checksum recorded for this ``(table, csv)`` pair, or ``None`` if it was never loaded."""
+def stored_checksum(
+    connection: sa.Connection,
+    versions: sa.Table,
+    table_name: str,
+    csv_key: str,
+    environment: str = UNSCOPED,
+) -> str | None:
+    """The checksum recorded for this ``(table, csv, environment)`` triple, or ``None`` if never loaded."""
     stored = connection.execute(
-        sa.select(versions.c.checksum).where(versions.c.table_name == table_name, versions.c.csv_path == csv_key)
+        sa.select(versions.c.checksum).where(
+            versions.c.table_name == table_name,
+            versions.c.csv_path == csv_key,
+            versions.c.environment == environment,
+        )
     ).scalar_one_or_none()
     return stored
 
@@ -130,12 +157,19 @@ def record_load(
     checksum: str,
     rows: int,
     now: datetime.datetime | None = None,
+    environment: str = UNSCOPED,
 ) -> None:
-    """Store (or replace) the checksum row for this ``(table, csv)`` pair."""
+    """Store (or replace) the checksum row for this ``(table, csv, environment)`` triple."""
     applied_at = now if now is not None else datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     values = {"checksum": checksum, "rows": rows, "applied_at": applied_at}
-    where = (versions.c.table_name == table_name, versions.c.csv_path == csv_key)
-    if stored_checksum(connection, versions, table_name, csv_key) is None:
-        connection.execute(sa.insert(versions).values(table_name=table_name, csv_path=csv_key, **values))
+    where = (
+        versions.c.table_name == table_name,
+        versions.c.csv_path == csv_key,
+        versions.c.environment == environment,
+    )
+    if stored_checksum(connection, versions, table_name, csv_key, environment) is None:
+        connection.execute(
+            sa.insert(versions).values(table_name=table_name, csv_path=csv_key, environment=environment, **values)
+        )
     else:
         connection.execute(sa.update(versions).where(*where).values(**values))

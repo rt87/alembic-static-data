@@ -43,6 +43,39 @@ def _check_header(header: list[str], path: Path) -> None:
         raise CsvFormatError(f"{path}: header contains duplicate columns: {duplicates}")
 
 
+ENVIRONMENT_SEPARATOR = ";"
+
+
+def select_environment_rows(
+    header: list[str],
+    rows: list[dict[str, str]],
+    environment_column: str,
+    environment: str,
+    csv_path: str | Path,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Keep the rows that apply to ``environment`` and drop the environment column from header and rows.
+
+    A blank cell means the row applies everywhere. Otherwise the cell is a ``;``-separated list of
+    environment names (``,`` belongs to the CSV), compared case-insensitively after stripping. The column is
+    removed afterwards, because it is bookkeeping rather than table data.
+    """
+    if environment_column not in header:
+        raise CsvFormatError(f"{csv_path}: environment column {environment_column!r} not found in header {header}")
+    wanted = environment.strip().casefold()
+    remaining_header = [name for name in header if name != environment_column]
+    selected: list[dict[str, str]] = []
+    for row in rows:
+        if _applies_to(row[environment_column], wanted):
+            selected.append({name: value for name, value in row.items() if name != environment_column})
+    return remaining_header, selected
+
+
+def _applies_to(cell: str, wanted: str) -> bool:
+    if not cell.strip():
+        return True  # unscoped row: applies to every environment
+    return any(part.strip().casefold() == wanted for part in cell.split(ENVIRONMENT_SEPARATOR))
+
+
 def check_natural_keys_in_header(header: list[str], natural_keys: list[str], csv_path: str | Path) -> None:
     """Raise ``NaturalKeyError`` unless ``natural_keys`` is non-empty and all of it appears in ``header``."""
     if not natural_keys:
