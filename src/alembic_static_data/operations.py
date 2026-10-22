@@ -19,6 +19,7 @@ from alembic_static_data.csv_loader import select_environment_rows
 from alembic_static_data.errors import EnvironmentNotSetError
 from alembic_static_data.errors import NaturalKeyError
 from alembic_static_data.errors import OfflineModeError
+from alembic_static_data.errors import StaticDataError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
 from alembic_static_data.tracking import UNSCOPED
 from alembic_static_data.tracking import checksum_for
@@ -210,6 +211,15 @@ def forget_static_data(operations: Operations, operation: ForgetStaticDataOp) ->
 def load_static_data(operations: Operations, operation: LoadStaticDataOp) -> UpsertResult:
     if operations.migration_context.as_sql:
         raise OfflineModeError("op.load_static_data() needs a database connection and cannot run in offline mode")
+    if operation.delete_missing and operation.environment_column is not None:
+        # Measured hazard: the filtered CSV omits every other environment's rows, so deleting what looks
+        # missing wipes them. The table has no environment column, so which row belongs where is unknowable
+        # here - there is no safe meaning to give this combination.
+        raise StaticDataError(
+            f"delete_missing=True cannot be combined with environment_column="
+            f"{operation.environment_column!r}: rows belonging to other environments are indistinguishable "
+            f"in the table -> use separate databases per environment, or drop one option"
+        )
     connection = operations.get_bind()
     table = sa.Table(operation.table_name, sa.MetaData(), schema=operation.schema, autoload_with=connection)
     environment = None

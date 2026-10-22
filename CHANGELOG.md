@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-22 — PR #13: refuse `delete_missing=True` together with `environment_column`, which silently deleted other environments' rows
+
 - 2026-10-22 — #11 → PR #12: refuse to load unless the table guarantees the `natural_keys` match at most one row (`require_unique=False` opts out), and accept a single natural key as a plain string
 
 - 2026-10-22 — #9 → PR #10: load a per-environment subset of one CSV via an environment column, with the environment taken from `alembic -x env=…` and made part of the checksum key
