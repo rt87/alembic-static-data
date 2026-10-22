@@ -226,6 +226,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "testcontainers" },
+    { name = "vermin" },
 ]
 
 [package.metadata]
@@ -249,6 +250,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.6" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.8" },
+    { name = "vermin", specifier = ">=1.6" },
 ]
 
 [[package]]
@@ -1968,6 +1970,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
+]
+
+[[package]]
+name = "vermin"
+version = "1.9.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/e2/ec751ab6385d29be7a8d7a54379fa7d3267440c55dde0f265a0730417027/vermin-1.9.2.tar.gz", hash = "sha256:ba4e01ab817c6baadf5f057bd6ea691e1147bcaf00c1ac8db54df0e25c6d2c6d", size = 223209, upload-time = "2026-10-19T18:59:36.454Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/c5/def1f1b124f67d085e219b99c6da4274b569d750558535ef373979fafa26/vermin-1.9.2-py3-none-any.whl", hash = "sha256:3e3e95d937f7d165eb928e0c268dfec466ccc40e9e1ce825e5d6e5aa027b6f30", size = 107769, upload-time = "2026-10-19T18:59:34.861Z" },
 ]
 
 [[package]]
