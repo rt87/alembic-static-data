@@ -97,7 +97,10 @@ alembic -x env=dev upgrade head      # loads EUR, JPY, XTS, XXX
 - The environment comes from Alembic's own `-x` mechanism, read with `get_x_argument()`. The key defaults to
   `env` and is configurable via `environment_key=`.
 - Rows for other environments are **ignored, not deleted** — scoping selects what to load, it does not
-  reconcile what is already there.
+  reconcile what is already there. `delete_missing=True` is therefore **refused** together with
+  `environment_column`: the filtered CSV omits every other environment's rows, the table has no environment
+  column to tell them apart, and deleting what looks missing would wipe them. Give each environment its own
+  database if you need the CSV to be authoritative.
 - Configuring `environment_column=` with no environment available is an error (`EnvironmentNotSetError`),
   not a reason to quietly load a subset.
 

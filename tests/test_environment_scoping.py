@@ -23,6 +23,7 @@ from alembic.script import ScriptDirectory
 from alembic_static_data.errors import CsvFormatError
 from alembic_static_data.errors import EnvironmentNotSetError
 from alembic_static_data.errors import NaturalKeyError
+from alembic_static_data.errors import StaticDataError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
 from alembic_static_data.tracking import version_table
 from alembic_static_data.upsert import UpsertResult
@@ -224,6 +225,29 @@ def test_the_environment_column_cannot_be_a_natural_key(op_in_environment, write
 
     with pytest.raises(NaturalKeyError, match="cannot also be a natural key"):
         op.load_static_data("currency", write_csv(SCOPED), ["code", "_env"], environment_column="_env")
+
+
+def test_delete_missing_is_refused_with_environment_scoping(op_in_environment, connection, write_csv) -> None:
+    """Measured before this guard existed: loading prod deleted the dev-only rows."""
+    op = op_in_environment("env=prod")
+
+    with pytest.raises(StaticDataError, match="cannot be combined with environment_column"):
+        op.load_static_data("currency", write_csv(SCOPED), ["code"], environment_column="_env", delete_missing=True)
+
+    assert fetch_all(connection) == [], "refused before touching the database"
+
+
+def test_either_option_alone_still_works(op_in_environment, connection, write_csv) -> None:
+    op = op_in_environment("env=prod")
+    op.load_static_data("currency", write_csv(SCOPED), ["code"], environment_column="_env")
+
+    # delete_missing alone, on an unscoped file, is unaffected by the guard.
+    result = op.load_static_data(
+        "currency", write_csv("code,name,decimals\nEUR,Euro,2\n"), ["code"], delete_missing=True
+    )
+
+    assert result.deleted == 1
+    assert [row["code"] for row in fetch_all(connection)] == ["EUR"]
 
 
 def test_scoping_works_without_checksum_tracking(op_in_environment, connection, write_csv) -> None:
