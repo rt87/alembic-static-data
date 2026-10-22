@@ -7,6 +7,7 @@
 [![Coverage: 100%](https://img.shields.io/badge/coverage-100%25-brightgreen)](#development)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-2a6db2)](https://mypy-lang.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000)](https://github.com/psf/black)
+[![License: MIT](https://img.shields.io/badge/license-MIT-750014)](LICENSE)
 
 An [Alembic](https://alembic.sqlalchemy.org/) plugin that loads **static reference data** (currencies, countries,
 lookup tables, ...) from a CSV file in a migration, **idempotently**, keyed on **natural keys**. Alembic has no
@@ -178,4 +179,4 @@ older Alembic iterates and arrives at the same module, and neither path emits a 
 
 ## License
 
-No license file has been chosen yet.
+[MIT](LICENSE), matching Alembic and SQLAlchemy, so this code can move upstream without a relicensing step.
