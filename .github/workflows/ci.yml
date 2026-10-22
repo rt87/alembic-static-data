@@ -1,14 +1,14 @@
 name: CI
 
-# DISABLED ON PURPOSE: CI minutes are spoken for until November 2026.
-# The automatic triggers below are commented out, so nothing runs without someone pressing
-# "Run workflow" (workflow_dispatch). To turn CI on, uncomment the push/pull_request block.
+# Runs on every push to main and on every pull request against it. Public repositories get Actions minutes
+# for free, which is what unblocked this - the workflow was dispatch-only while the account's minutes were
+# exhausted. workflow_dispatch stays, for re-running the matrix by hand.
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
 
 permissions:
   contents: read
@@ -71,9 +71,12 @@ jobs:
       - name: Test (resolved Alembic)
         if: matrix.alembic == 'resolved'
         # The coverage gate lives here rather than in pyproject's addopts, so a local partial run
-        # (pytest -k ...) does not fail on coverage while CI still holds the line the badge claims.
+        # (pytest -k ...) does not fail on coverage while CI still holds the line the badge claims. It runs
+        # on every supported Python, so a regression cannot hide behind one interpreter.
         run: uv run --frozen pytest -q -W error::DeprecationWarning --cov-fail-under=100
 
       - name: Test (Alembic ${{ matrix.alembic }})
         if: matrix.alembic != 'resolved'
+        # No coverage gate here on purpose: below Alembic 1.18 two plugin-system tests skip themselves, so
+        # the measured percentage is not comparable. The gate lives on the jobs that run the whole suite.
         run: uv run --frozen --with "alembic==${{ matrix.alembic }}" pytest -q --no-cov -W error::DeprecationWarning

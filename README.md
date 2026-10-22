@@ -265,9 +265,12 @@ which is gitignored: a committed rule would publish the very strings it exists t
 Both are a seatbelt, not a lock: `git push --no-verify` bypasses them, and a clone that never set
 `core.hooksPath` has no hooks at all.
 
-CI lives in `.github/workflows/ci.yml` and is **deliberately disabled** (only `workflow_dispatch`) while CI
-minutes are spoken for; uncomment the `push`/`pull_request` triggers to turn it on. It lints, type-checks,
-and runs the suite on Python 3.11-3.14 plus one job per Alembic plugin-loading regime.
+CI lives in `.github/workflows/ci.yml` and runs on every push to `main` and every pull request against it;
+public repositories get Actions minutes for free. It lints, type-checks, checks the Python floor with
+`vermin`, and runs the suite on Python 3.11-3.14 plus one job per Alembic plugin-loading regime. The four
+full-suite jobs enforce `--cov-fail-under=100`, so the coverage badge cannot quietly start lying; the
+older-Alembic jobs skip the gate because two plugin-system tests skip themselves below 1.18, which makes the
+percentage incomparable.
 
 The suite covers in-memory SQLite and, via `testcontainers`, a real Postgres 17 - the latter is the only way
 to exercise named schemas and server-side `Numeric`. The Postgres tests skip themselves when Docker is not
