@@ -1,15 +1,32 @@
 [project]
 name = "alembic-static-data"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Alembic plugin: idempotent loading of static reference data from CSV files, keyed on natural keys"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "rt87" }]
+keywords = ["alembic", "migration", "reference-data", "seed-data", "csv", "sqlalchemy", "upsert"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "alembic>=1.17",
     "sqlalchemy>=2.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/rt87/alembic-static-data"
+Issues = "https://github.com/rt87/alembic-static-data/issues"
 
 [project.entry-points."alembic.plugins"]
 # Target is a single module exposing `setup(plugin)`, as alembic>=1.20.1 documents. 1.18.0 (first release with
@@ -42,6 +59,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alembic_static_data"]
+
+[tool.hatch.build.targets.sdist]
+# An sdist should carry what someone needs to build and check the project - not internal notes.
+exclude = [
+    "PROJECT_NOTES.md",
+    ".github",
+    ".python-version",
+    ".idea",
+]
 
 [tool.black]
 # Match ruff's line-length, or the two tools fight over every wrapped line.
