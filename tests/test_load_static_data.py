@@ -70,6 +70,19 @@ def test_rerun_is_idempotent(op, connection, write_csv) -> None:
 
     result = op.load_static_data("currency", csv_path, ["code"])
 
+    # Checksum tracking is on by default, so an unchanged file is skipped outright; see
+    # test_checksum_tracking.py. Either way the table is untouched, which is what idempotence means here.
+    assert result == UpsertResult(skipped=True)
+    assert fetch_all(connection) == before
+
+
+def test_rerun_without_tracking_upserts_and_finds_nothing_to_do(op, connection, write_csv) -> None:
+    csv_path = write_csv(BASE)
+    op.load_static_data("currency", csv_path, ["code"], track_checksum=False)
+    before = fetch_all(connection)
+
+    result = op.load_static_data("currency", csv_path, ["code"], track_checksum=False)
+
     assert result == UpsertResult(inserted=0, updated=0, unchanged=2)
     assert fetch_all(connection) == before
 

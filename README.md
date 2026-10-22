@@ -12,7 +12,7 @@ An [Alembic](https://alembic.sqlalchemy.org/) plugin that loads **static referen
 lookup tables, ...) from a CSV file in a migration, **idempotently**, keyed on **natural keys**. Alembic has no
 built-in support for repeatable/seed data; this fills that gap.
 
-Status: first prototype. One operation, no rerun tracking.
+Status: first prototype. One operation, with checksum-based rerun tracking.
 
 ## Usage
 
@@ -33,16 +33,18 @@ EUR,Euro,2
 JPY,Yen,0
 ```
 
-`op.load_static_data(table_name, csv_path, natural_keys, schema=None)`:
+`op.load_static_data(table_name, csv_path, natural_keys, schema=None, *, delete_missing=False,
+track_checksum=True, version_table_name="static_data_version")`:
 
 - Rows whose natural key is not in the table are **inserted**.
 - Rows whose natural key exists and whose non-key values differ are **updated** (only the changed columns).
 - Identical rows are left alone, so running it again changes nothing (idempotent).
-- Rows in the table but absent from the CSV are **never deleted**. Columns absent from the CSV are never touched.
+- Rows in the table but absent from the CSV are **never deleted** unless you pass `delete_missing=True`.
+  Columns absent from the CSV are never touched either way.
 - The table must already exist (create it earlier in the migration). It is reflected from the live connection.
 - Cells are converted to the column's Python type (`int`, `float`, `Decimal`, `bool`, `date`, `datetime` ISO format);
   an empty cell becomes `NULL`.
-- The returned `UpsertResult(inserted, updated, unchanged)` is also logged at INFO.
+- The returned `UpsertResult(inserted, updated, unchanged, deleted, skipped)` is also logged at INFO.
 - Uses plain SQLAlchemy Core (SELECT, then INSERT or UPDATE), no dialect-specific `ON CONFLICT`/`MERGE`.
 - `csv_path` is resolved relative to the working directory (or pass an absolute `Path`).
 
@@ -51,6 +53,33 @@ column or key: a missing or empty CSV, a blank/duplicate header, a row with the 
 missing from the CSV header, a duplicate natural key within the CSV, a CSV column the table does not have, a value
 that cannot be converted, and offline (`--sql`) mode, which is unsupported because the operation must read the
 database.
+
+## Rerun tracking
+
+By default each load records its CSV's SHA-256 in a `static_data_version` table (created on first use, in the
+same schema as the table being loaded, next to Alembic's `alembic_version`), and **skips the load entirely
+while that checksum is unchanged**:
+
+```python
+op.load_static_data("currency", "data/currency.csv", natural_keys=["code"])
+# first run:  UpsertResult(inserted=2)
+# re-run:     UpsertResult(skipped=True)      - file unchanged, nothing read, nothing written
+# after edit: UpsertResult(updated=1)         - checksum differs, so the upsert runs again
+```
+
+This is what makes a revision safe to re-run when its data file changes, which is Alembic's missing
+repeatable-migration behaviour (issue #1). Notes on the design:
+
+- The trigger lives **inside the operation**, not in an `env.py` hook or a separate command, so data loads
+  stay ordered by revision order and nothing new has to be wired up.
+- The checksum describes the **file**, not the table. A row edited by hand in the database stays edited until
+  the CSV itself changes; `track_checksum=False` restores the old always-upsert behaviour.
+- Bytes are hashed, not parsed rows, so re-indenting a CSV counts as a change (the following load is then a
+  no-op upsert). Line endings count too: the same file as CRLF and as LF hash differently.
+- One row per `(table_name, csv_path)` pair, keyed on the path **as written** in the migration, with
+  separators normalised - so a relative path stays stable across checkouts, and the same CSV loaded into two
+  tables is tracked separately.
+- `version_table_name=` renames the table; loads tracked in different tables do not see each other.
 
 ## Install
 
@@ -100,11 +129,12 @@ uv run --with "alembic==1.17.0" pytest -q --no-cov -W error::DeprecationWarning
 
 ## Not done yet
 
-- **No rerun-on-checksum tracking.** The operation runs whenever the migration runs. Re-applying a changed CSV
-  automatically (tracking a checksum per file) needs a design decision and is out of scope for this pass.
 - **No Postgres test run.** Tests run against in-memory SQLite only; Docker is not available on the dev machine.
   TODO: add the same suite against Postgres (e.g. via `testcontainers`) before relying on it there.
-- No `downgrade` behaviour: the operation is not reversible by design (it never deletes).
+- No `downgrade` behaviour: the operation is not reversible by design, and a downgrade leaves the
+  `static_data_version` row in place.
+- Deleting rows is opt-in per call (`delete_missing=True`) and is skipped along with everything else when the
+  checksum matches, so it is not a reconciliation mechanism.
 - No offline (`--sql`) support.
 - Rows are processed one at a time (one SELECT each), which is fine for reference data but not for large files.
 
