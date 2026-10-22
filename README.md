@@ -66,11 +66,13 @@ environment_key="env", require_unique=True)`:
   worked example; `env.py` cannot hold that constant, because Alembic loads it by path rather than as an
   importable module.
 
-Failures raise subclasses of `alembic_static_data.errors.StaticDataError` with a message naming the file, line,
-column or key: a missing or empty CSV, a blank/duplicate header, a row with the wrong number of cells, a natural key
-missing from the CSV header, a duplicate natural key within the CSV, a CSV column the table does not have, a value
-that cannot be converted, and offline (`--sql`) mode, which is unsupported because the operation must read the
-database.
+Failures raise subclasses of `alembic_static_data.errors.StaticDataError` with a message naming the file,
+line, column or key. The CSV itself: a missing or empty file, a blank or duplicated header column, a row with
+the wrong number of cells, a natural key missing from the header, a duplicate natural key, a column the table
+does not have, a value that cannot be converted. The call: natural keys the table does not guarantee to be
+unique, `environment_column` without an environment to select with, and `delete_missing=True` combined with
+`environment_column`. The context: offline (`--sql`) mode, which cannot work because the operation must read
+the database, and a `static_data_version` table left over from an earlier pre-1.0 release.
 
 ## Environment scoping
 
@@ -142,11 +144,10 @@ repeatable-migration behaviour (issue #1). Notes on the design:
   the CSV itself changes; `track_checksum=False` restores the old always-upsert behaviour.
 - Bytes are hashed, not parsed rows, so re-indenting a CSV counts as a change (the following load is then a
   no-op upsert). Line endings count too: the same file as CRLF and as LF hash differently.
-- One row per `(table_name, csv_path)` pair, keyed on the path **as written** in the migration, with
-  separators normalised - so a relative path stays stable across checkouts, and the same CSV loaded into two
-  tables is tracked separately.
+- One row per `(table_name, csv_path, environment)`, keyed on the path **as written** in the migration with
+  separators normalised - so a relative path stays stable across checkouts, the same CSV loaded into two
+  tables is tracked separately, and each environment is tracked on its own (see Environment scoping above).
 - `version_table_name=` renames the table; loads tracked in different tables do not see each other.
-- One row per `(table_name, csv_path, environment)`; see Environment scoping above.
 
 ### Downgrades
 
@@ -164,8 +165,9 @@ def downgrade() -> None:
 
 `op.forget_static_data(table_name, csv_path=None, schema=None, *, version_table_name="static_data_version",
 environment=None)` deletes only bookkeeping, never table data, and returns how many recorded loads it forgot.
-Omit `csv_path` to forget every file recorded for that table, and `environment` to forget every environment. It never creates the checksum table, and forgetting something that
-was never recorded returns `0` rather than failing.
+Omit `csv_path` to forget every file recorded for that table, and `environment` to forget every environment.
+It never creates the checksum table, and forgetting something that was never recorded returns `0` rather
+than failing.
 
 ### Autogenerate
 
@@ -239,12 +241,14 @@ uv run --with "alembic==1.17.0" pytest -q --no-cov -W error::DeprecationWarning
 
 ## Not done yet
 
-- The load is not reversible by design (it never deletes data), so a `downgrade()` that removes rows has to
-  call `op.forget_static_data()` itself - see Downgrades above.
+- The load has no inverse for the data it wrote - only for its bookkeeping - so a `downgrade()` that removes
+  rows has to call `op.forget_static_data()` itself; see Downgrades above.
 - Deleting rows is opt-in per call (`delete_missing=True`) and is skipped along with everything else when the
   checksum matches, so it is not a reconciliation mechanism.
 - No offline (`--sql`) support.
 - Rows are processed one at a time (one SELECT each), which is fine for reference data but not for large files.
+- With `require_unique=False`, `updated` counts CSV rows rather than affected table rows, so it under-reports
+  when one CSV row matches several table rows. That is the whole reason the check is on by default.
 
 ## Alembic compatibility
 
