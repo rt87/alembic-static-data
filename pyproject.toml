@@ -5,14 +5,14 @@ description = "Alembic plugin: idempotent loading of static reference data from 
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "alembic>=1.20",
+    "alembic>=1.20.1",
     "sqlalchemy>=2.0",
 ]
 
 [project.entry-points."alembic.plugins"]
-# Alembic does `for mod in entrypoint.load()`, so the target must be an iterable of plugin modules,
-# each exposing `setup(plugin)`. See alembic/runtime/plugins.py::_setup.
-alembic_static_data = "alembic_static_data:PLUGIN_MODULES"
+# Target is a single module exposing `setup(plugin)`. Needs alembic>=1.20.1: 1.20.0 wrongly iterated the loaded
+# object (`for mod in entrypoint.load()`), fixed in 1.20.1 (alembic #1873). See alembic/runtime/plugins.py::_setup.
+alembic_static_data = "alembic_static_data.plugin"
 
 [dependency-groups]
 dev = [
