@@ -81,6 +81,23 @@ repeatable-migration behaviour (issue #1). Notes on the design:
   tables is tracked separately.
 - `version_table_name=` renames the table; loads tracked in different tables do not see each other.
 
+The checksum table exists in the database but not in your `target_metadata`, so
+`alembic revision --autogenerate` would otherwise propose dropping it. Exclude it in `env.py`:
+
+```python
+from alembic_static_data import exclude_from_autogenerate
+
+context.configure(
+    connection=connection,
+    target_metadata=target_metadata,
+    include_name=exclude_from_autogenerate,
+)
+```
+
+For a renamed table, bind the name first:
+`functools.partial(exclude_from_autogenerate, version_table_names=["my_static_data"])`. If you already have
+an `include_name`, call both and `and` the results.
+
 ## Install
 
 Requires **Python 3.11+** and **Alembic 1.17 or newer**.
@@ -121,6 +138,10 @@ CI lives in `.github/workflows/ci.yml` and is **deliberately disabled** (only `w
 minutes are spoken for; uncomment the `push`/`pull_request` triggers to turn it on. It lints, type-checks,
 and runs the suite on Python 3.11-3.14 plus one job per Alembic plugin-loading regime.
 
+The suite covers in-memory SQLite and, via `testcontainers`, a real Postgres 17 - the latter is the only way
+to exercise named schemas and server-side `Numeric`. The Postgres tests skip themselves when Docker is not
+reachable, so `uv run pytest` works either way.
+
 To check an older Alembic (the suite skips the two plugin-system tests below 1.18):
 
 ```bash
@@ -129,8 +150,6 @@ uv run --with "alembic==1.17.0" pytest -q --no-cov -W error::DeprecationWarning
 
 ## Not done yet
 
-- **No Postgres test run.** Tests run against in-memory SQLite only; Docker is not available on the dev machine.
-  TODO: add the same suite against Postgres (e.g. via `testcontainers`) before relying on it there.
 - No `downgrade` behaviour: the operation is not reversible by design, and a downgrade leaves the
   `static_data_version` row in place.
 - Deleting rows is opt-in per call (`delete_missing=True`) and is skipped along with everything else when the

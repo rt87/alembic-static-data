@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+from collections.abc import Collection
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -20,6 +21,37 @@ DEFAULT_VERSION_TABLE = "static_data_version"
 # MySQL caps a composite primary key at 3072 bytes, i.e. 768 utf8mb4 characters, so keep both key columns short.
 _TABLE_NAME_LENGTH = 128
 _CSV_PATH_LENGTH = 512
+
+
+def exclude_from_autogenerate(
+    name: str | None,
+    type_: str,
+    parent_names: dict[str, str | None] | None = None,
+    *,
+    version_table_names: Collection[str] = (DEFAULT_VERSION_TABLE,),
+) -> bool:
+    """``include_name`` predicate that hides the checksum table from ``alembic revision --autogenerate``.
+
+    The checksum table is created by this plugin at load time, so it exists in the database but not in the
+    user's ``target_metadata``. Autogenerate would therefore propose ``op.drop_table("static_data_version")``.
+    Alembic excludes its own ``alembic_version`` table automatically but knows nothing about ours, so pass
+    this to :meth:`EnvironmentContext.configure`::
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_name=exclude_from_autogenerate,
+        )
+
+    For a renamed table (``version_table_name=``), bind the names first::
+
+        include_name=functools.partial(exclude_from_autogenerate, version_table_names=["my_static_data"])
+
+    If you already have an ``include_name``, call both and ``and`` the results.
+    """
+    if type_ == "table" and name in version_table_names:
+        return False
+    return True
 
 
 def checksum_for(csv_path: str | Path) -> str:

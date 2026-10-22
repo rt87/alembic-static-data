@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import datetime
+import functools
 import hashlib
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
 from freezegun import freeze_time
 
+from alembic_static_data import exclude_from_autogenerate
 from alembic_static_data.errors import CsvFormatError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
 from alembic_static_data.tracking import checksum_for
@@ -28,6 +32,33 @@ def versions(connection: sa.Connection, table: str = DEFAULT_VERSION_TABLE) -> l
         sa.select(versions_table).order_by(versions_table.c.table_name, versions_table.c.csv_path)
     )
     return [dict(row) for row in rows.mappings()]
+
+
+def removed_tables(connection: sa.Connection, metadata: sa.MetaData, **opts: object) -> set[str]:
+    """Table names that `alembic revision --autogenerate` would propose dropping."""
+    diffs = compare_metadata(MigrationContext.configure(connection, opts=opts), metadata)
+    removed = set()
+    for diff in diffs:
+        entries = diff if isinstance(diff, list) else [diff]
+        for entry in entries:
+            if entry[0] == "remove_table":
+                removed.add(entry[1].name)
+    return removed
+
+
+def currency_metadata() -> sa.MetaData:
+    """What a user's env.py knows about: their own tables, not this plugin's bookkeeping."""
+    metadata = sa.MetaData()
+    sa.Table(
+        "currency",
+        metadata,
+        sa.Column("code", sa.String(3), primary_key=True),
+        sa.Column("name", sa.String(50), nullable=False),
+        sa.Column("decimals", sa.Integer, nullable=True),
+        sa.Column("active", sa.Boolean, nullable=True),
+        sa.Column("introduced", sa.Date, nullable=True),
+    )
+    return metadata
 
 
 # ---- skipping ----
@@ -169,6 +200,41 @@ def test_a_rewritten_but_equivalent_file_still_counts_as_changed(op, connection,
     result = op.load_static_data("currency", write_csv(BASE.replace(",2\n", ", 2\n")), ["code"])
 
     assert result == UpsertResult(unchanged=2)
+
+
+# ---- keeping autogenerate away from the checksum table ----
+
+
+def test_autogenerate_would_drop_the_checksum_table_without_the_predicate(op, connection, write_csv) -> None:
+    op.load_static_data("currency", write_csv(BASE), ["code"])
+
+    assert removed_tables(connection, currency_metadata()) == {
+        DEFAULT_VERSION_TABLE
+    }, "this is the footgun exclude_from_autogenerate exists to prevent"
+
+
+def test_exclude_from_autogenerate_hides_the_checksum_table(op, connection, write_csv) -> None:
+    op.load_static_data("currency", write_csv(BASE), ["code"])
+
+    removed = removed_tables(connection, currency_metadata(), include_name=exclude_from_autogenerate)
+
+    assert removed == set()
+
+
+def test_exclude_from_autogenerate_handles_a_renamed_checksum_table(op, connection, write_csv) -> None:
+    op.load_static_data("currency", write_csv(BASE), ["code"], version_table_name="my_static_data")
+    predicate = functools.partial(exclude_from_autogenerate, version_table_names=["my_static_data"])
+
+    assert removed_tables(connection, currency_metadata()) == {"my_static_data"}
+    assert removed_tables(connection, currency_metadata(), include_name=predicate) == set()
+
+
+def test_exclude_from_autogenerate_keeps_everything_else() -> None:
+    assert exclude_from_autogenerate("currency", "table") is True
+    assert exclude_from_autogenerate(DEFAULT_VERSION_TABLE, "table") is False
+    # Only tables are filtered: a column that happens to share the name stays included.
+    assert exclude_from_autogenerate(DEFAULT_VERSION_TABLE, "column", {"table_name": "currency"}) is True
+    assert exclude_from_autogenerate(None, "schema") is True
 
 
 # ---- opt-in deletion ----
