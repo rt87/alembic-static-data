@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fails the commit before it exists, so nothing has to be rewritten later.
+set -eu
+hooks_dir="$(dirname "$0")"
+. "$hooks_dir/identity-check"
+
+if ! check_text "message" < "$1"; then
+    printf '\nCommit rejected: see above. Fix the message, or adjust .githooks/identity-check if the rule is wrong.\n' >&2
+    exit 1
+fi

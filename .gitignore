@@ -11,3 +11,4 @@ CLAUDE.md
 .idea/
 PROJECT_NOTES.md
 .archive/
+.githooks/identity-check.local

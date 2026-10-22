@@ -1,0 +1,30 @@
+#!/bin/sh
+# The actual gate: every commit about to be pushed is checked - identity, message and content.
+set -eu
+hooks_dir="$(dirname "$0")"
+. "$hooks_dir/identity-check"
+
+zero='0000000000000000000000000000000000000000'
+status=0
+checked=0
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue                      # branch deletion, nothing to inspect
+    if [ "$remote_sha" = "$zero" ]; then
+        commits="$(git rev-list "$local_sha" --not --remotes)"   # new branch: everything not yet on a remote
+    else
+        commits="$(git rev-list "$remote_sha..$local_sha")"
+    fi
+    for sha in $commits; do
+        checked=$((checked + 1))
+        check_commit "$sha" || status=1
+    done
+done
+
+if [ "$status" -ne 0 ]; then
+    printf '\nPush rejected: %d commit(s) inspected, see the findings above.\n' "$checked" >&2
+    printf 'Rewrite the offending commits (git rebase -i, or git filter-repo for the whole history).\n' >&2
+    exit 1
+fi
+
+printf 'identity-check: %d commit(s) clean.\n' "$checked"

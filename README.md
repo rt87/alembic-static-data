@@ -238,6 +238,7 @@ since it runs against the editable install.
 ## Development
 
 ```bash
+git config core.hooksPath .githooks   # once per clone, see below
 uv sync
 uv run ruff check .
 uv run black .       # formats at line-length 120; `blackd` is installed for editors
@@ -247,6 +248,22 @@ uv run pytest        # includes coverage; pytest-randomly shuffles order each ru
 uv run pytest --testmon --no-cov   # fast inner loop: only tests affected by your edits
 uv run pytest -n auto --no-cov     # parallel
 ```
+
+### Identity hooks
+
+`.githooks/` holds two hooks that keep commits from carrying anything that should not become public:
+`commit-msg` fails a commit immediately, and `pre-push` inspects every commit about to leave the machine -
+its author and committer identity, its message, and the content it introduces. Enable them once per clone
+with `git config core.hooksPath .githooks`.
+
+The allow-list is this account's GitHub noreply address plus GitHub's own address on web merge commits; any
+other address fails. Project-wide patterns live in `.githooks/identity-check` and are generic. Anything
+personal - a corporate login, an employer name, a private address - goes in `.githooks/identity-check.local`,
+which is gitignored: a committed rule would publish the very strings it exists to withhold. Copy
+`identity-check.local.example` to get started.
+
+Both are a seatbelt, not a lock: `git push --no-verify` bypasses them, and a clone that never set
+`core.hooksPath` has no hooks at all.
 
 CI lives in `.github/workflows/ci.yml` and is **deliberately disabled** (only `workflow_dispatch`) while CI
 minutes are spoken for; uncomment the `push`/`pull_request` triggers to turn it on. It lints, type-checks,

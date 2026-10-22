@@ -1,0 +1,7 @@
+# Copy to identity-check.local (gitignored) and fill in the identifiers that must never be published from
+# this machine - a corporate login, an employer or client name, a private address. Keeping them out of the
+# repository is the point: a committed rule would publish the very strings it exists to withhold.
+#
+# One POSIX extended regex, alternatives separated by |. Case is ignored by the hook.
+#
+# FORBIDDEN_LOCAL='mylogin|my[._ -]?employer|mailprovider|first\.last@provider\.com'

@@ -1,0 +1,71 @@
+#!/bin/sh
+# Shared check: no commit leaves this machine carrying an identifier that should not be public, or an
+# address other than this account's GitHub one.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+#
+# Sourced by commit-msg (fast feedback) and pre-push (the gate). `git push --no-verify` bypasses it, as
+# does a push from a clone that has not set core.hooksPath - this is a seatbelt, not a lock.
+#
+# Deliberately split in two: the patterns below are generic and safe to publish. Anything personal - a
+# corporate login, an employer name - belongs in identity-check.local, which is gitignored, so that the
+# rule never names in public what it is meant to keep out of public. See identity-check.local.example.
+
+ALLOWED_MAIL='(30858878\+rt87@users\.noreply\.github\.com|noreply@github\.com)'
+
+# Deliberately empty in the committed file: any pattern worth blocking names something that should not be
+# public, so writing it here would defeat its own purpose. Addresses are covered regardless by the
+# allow-list check below - anything that is not this account's GitHub address fails. Provider names,
+# logins and employer names belong in identity-check.local; see identity-check.local.example.
+FORBIDDEN=''
+
+# The local part must start alphanumerically. Without that, a diff line like "+@pytest.fixture" parses as
+# an address whose local part is the diff marker - which is exactly how this rule was found to be wrong.
+ANY_MAIL='[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+'
+
+hooks_dir="${hooks_dir:-$(dirname "$0")}"
+if [ -f "$hooks_dir/identity-check.local" ]; then
+    . "$hooks_dir/identity-check.local"
+    # Concatenating onto an empty FORBIDDEN would yield a leading "|", and grep -E then matches the empty
+    # string - which rejects every commit. Found by testing, not by reading.
+    if [ -n "${FORBIDDEN_LOCAL:-}" ]; then
+        if [ -n "$FORBIDDEN" ]; then FORBIDDEN="$FORBIDDEN|$FORBIDDEN_LOCAL"; else FORBIDDEN="$FORBIDDEN_LOCAL"; fi
+    fi
+fi
+
+# Reports forbidden identifiers and non-allowlisted addresses in the text on stdin.
+# $1 = label used in the error message. Returns 1 when something was found.
+check_text() {
+    label="$1"
+    text="$(cat)"
+
+    hits=""
+    # An empty pattern list must not match everything: grep -E "" matches every line.
+    [ -n "$FORBIDDEN" ] && hits="$(printf '%s' "$text" | grep -Eio "$FORBIDDEN" | sort -u | tr '\n' ' ')"
+    if [ -n "$hits" ]; then
+        printf '  %s: forbidden identifier(s): %s\n' "$label" "$hits" >&2
+        return 1
+    fi
+
+    # Decorators such as @pytest.fixture are not addresses: ANY_MAIL requires a dotted TLD after the @.
+    foreign="$(printf '%s' "$text" | grep -Eio "$ANY_MAIL" | grep -Eiv "^$ALLOWED_MAIL$" | sort -u | tr '\n' ' ')"
+    if [ -n "$foreign" ]; then
+        printf '  %s: address(es) other than the GitHub one: %s\n' "$label" "$foreign" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Checks one commit: both identities, the message, and the content it introduces.
+check_commit() {
+    sha="$1"
+    short="$(git rev-parse --short "$sha")"
+    rc=0
+    git log -1 --format='%an <%ae>%n%cn <%ce>' "$sha" | check_text "commit $short identity" || rc=1
+    git log -1 --format='%B' "$sha" | check_text "commit $short message" || rc=1
+    # .githooks/ is excluded from the content check on purpose: this file names the patterns it blocks, so
+    # scanning it would reject the very commit that introduces the protection. Identity and message of
+    # such commits are still checked, and personal patterns live outside the repository anyway.
+    git show --format= --no-color "$sha" -- . ':(exclude).githooks' | check_text "commit $short content" || rc=1
+    return $rc
+}
