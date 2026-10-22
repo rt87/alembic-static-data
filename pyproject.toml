@@ -91,7 +91,7 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 # Test functions take pytest fixtures; annotating every one of them buys nothing. mypy patterns can only
 # wildcard whole dotted components, and tests/ is not a package, so new test modules go in this list.
-module = ["conftest", "test_units", "test_load_static_data", "test_checksum_tracking", "test_postgres", "test_forget_static_data", "test_example_project"]
+module = ["conftest", "test_units", "test_load_static_data", "test_checksum_tracking", "test_postgres", "test_forget_static_data", "test_example_project", "test_environment_scoping"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 

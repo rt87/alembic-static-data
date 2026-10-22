@@ -14,8 +14,12 @@ from alembic.operations import Operations
 from alembic_static_data.csv_loader import check_natural_keys_in_header
 from alembic_static_data.csv_loader import check_unique_keys
 from alembic_static_data.csv_loader import load_csv_rows
+from alembic_static_data.csv_loader import select_environment_rows
+from alembic_static_data.errors import EnvironmentNotSetError
+from alembic_static_data.errors import NaturalKeyError
 from alembic_static_data.errors import OfflineModeError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
+from alembic_static_data.tracking import UNSCOPED
 from alembic_static_data.tracking import checksum_for
 from alembic_static_data.tracking import ensure_version_table
 from alembic_static_data.tracking import forget_load
@@ -33,6 +37,24 @@ from alembic_static_data.upsert import upsert_rows
 log = logging.getLogger(__name__)
 
 
+DEFAULT_ENVIRONMENT_KEY = "env"
+
+
+def resolve_environment(operations: Operations, environment_key: str) -> str | None:
+    """The environment from Alembic's ``-x`` arguments, e.g. ``alembic -x env=prod upgrade head``.
+
+    Returns ``None`` when there is nothing to read it from: either no ``-x`` argument was given, or the
+    migration runs without an ``EnvironmentContext`` at all (as in a test that configures a
+    ``MigrationContext`` directly). ``get_x_argument(as_dictionary=True)`` exists from Alembic 1.13.1.
+    """
+    environment_context = getattr(operations.migration_context, "environment_context", None)
+    if environment_context is None:
+        return None
+    arguments = environment_context.get_x_argument(as_dictionary=True)
+    value = arguments.get(environment_key)
+    return value or None
+
+
 @Operations.register_operation("load_static_data")
 class LoadStaticDataOp(MigrateOperation):
     """Idempotently load a CSV file into a table, keyed on natural keys. Never deletes rows."""
@@ -47,6 +69,8 @@ class LoadStaticDataOp(MigrateOperation):
         delete_missing: bool = False,
         track_checksum: bool = True,
         version_table_name: str = DEFAULT_VERSION_TABLE,
+        environment_column: str | None = None,
+        environment_key: str = DEFAULT_ENVIRONMENT_KEY,
     ) -> None:
         self.table_name = table_name
         self.csv_path = csv_path
@@ -55,6 +79,8 @@ class LoadStaticDataOp(MigrateOperation):
         self.delete_missing = delete_missing
         self.track_checksum = track_checksum
         self.version_table_name = version_table_name
+        self.environment_column = environment_column
+        self.environment_key = environment_key
 
     @classmethod
     def load_static_data(
@@ -68,6 +94,8 @@ class LoadStaticDataOp(MigrateOperation):
         delete_missing: bool = False,
         track_checksum: bool = True,
         version_table_name: str = DEFAULT_VERSION_TABLE,
+        environment_column: str | None = None,
+        environment_key: str = DEFAULT_ENVIRONMENT_KEY,
     ) -> UpsertResult | None:
         """Issue ``op.load_static_data(table_name, csv_path, natural_keys)`` from a migration script.
 
@@ -80,6 +108,12 @@ class LoadStaticDataOp(MigrateOperation):
         :param track_checksum: when true (the default), record the CSV's SHA-256 and skip the load entirely
             while that checksum is unchanged, so re-running a revision reloads only the files that changed.
         :param version_table_name: name of the checksum table, created on first use.
+        :param environment_column: name of a CSV column naming the environments a row belongs to, e.g.
+            ``"_env"``. A blank cell means the row applies everywhere, otherwise it is a ``;``-separated
+            list compared case-insensitively. The column is not a table column: it is removed before the
+            upsert. Rows for other environments are ignored entirely, so the same natural key may appear
+            once per environment.
+        :param environment_key: the ``-x`` key the environment is read from, i.e. ``alembic -x env=prod``.
         """
         operation = cls(
             table_name,
@@ -89,6 +123,8 @@ class LoadStaticDataOp(MigrateOperation):
             delete_missing=delete_missing,
             track_checksum=track_checksum,
             version_table_name=version_table_name,
+            environment_column=environment_column,
+            environment_key=environment_key,
         )
         return cast("UpsertResult | None", operations.invoke(operation))
 
@@ -104,11 +140,13 @@ class ForgetStaticDataOp(MigrateOperation):
         schema: str | None = None,
         *,
         version_table_name: str = DEFAULT_VERSION_TABLE,
+        environment: str | None = None,
     ) -> None:
         self.table_name = table_name
         self.csv_path = csv_path
         self.schema = schema
         self.version_table_name = version_table_name
+        self.environment = environment
 
     @classmethod
     def forget_static_data(
@@ -119,6 +157,7 @@ class ForgetStaticDataOp(MigrateOperation):
         schema: str | None = None,
         *,
         version_table_name: str = DEFAULT_VERSION_TABLE,
+        environment: str | None = None,
     ) -> int:
         """Issue ``op.forget_static_data(table_name, csv_path)`` from a migration script.
 
@@ -130,9 +169,10 @@ class ForgetStaticDataOp(MigrateOperation):
         :param csv_path: the file to forget; omit it to forget every file recorded for this table.
         :param schema: optional schema, as passed to the load.
         :param version_table_name: name of the checksum table, as passed to the load.
+        :param environment: forget only this environment's record; omit it to forget every environment.
         :return: how many recorded loads were forgotten; ``0`` if there was nothing to forget.
         """
-        operation = cls(table_name, csv_path, schema, version_table_name=version_table_name)
+        operation = cls(table_name, csv_path, schema, version_table_name=version_table_name, environment=environment)
         return cast("int", operations.invoke(operation))
 
 
@@ -149,7 +189,7 @@ def forget_static_data(operations: Operations, operation: ForgetStaticDataOp) ->
         return 0
     versions = version_table(operation.version_table_name, operation.schema)
     csv_key = tracking_key(operation.csv_path) if operation.csv_path is not None else None
-    forgotten = forget_load(connection, versions, operation.table_name, csv_key)
+    forgotten = forget_load(connection, versions, operation.table_name, csv_key, operation.environment)
     log.info("forget_static_data %s from %s: forgot %d", operation.table_name, operation.csv_path, forgotten)
     return forgotten
 
@@ -160,24 +200,60 @@ def load_static_data(operations: Operations, operation: LoadStaticDataOp) -> Ups
         raise OfflineModeError("op.load_static_data() needs a database connection and cannot run in offline mode")
     connection = operations.get_bind()
     table = sa.Table(operation.table_name, sa.MetaData(), schema=operation.schema, autoload_with=connection)
+    environment = None
+    if operation.environment_column is not None:
+        environment = resolve_environment(operations, operation.environment_key)
+        if environment is None:
+            raise EnvironmentNotSetError(
+                f"environment_column={operation.environment_column!r} was given, but no environment was "
+                f"found: pass it as `alembic -x {operation.environment_key}=<name> upgrade ...`"
+            )
+
     if not operation.track_checksum:
         return apply_static_data(
-            connection, table, operation.csv_path, operation.natural_keys, delete_missing=operation.delete_missing
+            connection,
+            table,
+            operation.csv_path,
+            operation.natural_keys,
+            delete_missing=operation.delete_missing,
+            environment_column=operation.environment_column,
+            environment=environment,
         )
 
     # Checksum first: a missing file must fail the same way whether or not tracking is on.
     checksum = checksum_for(operation.csv_path)
     csv_key = tracking_key(operation.csv_path)
+    # The environment is part of the key: the same bytes select different rows per environment.
+    tracked_environment = environment if environment is not None else UNSCOPED
     versions = version_table(operation.version_table_name, operation.schema)
     ensure_version_table(connection, versions)
-    if stored_checksum(connection, versions, operation.table_name, csv_key) == checksum:
-        log.info("load_static_data %s from %s: skipped, checksum unchanged", table.name, operation.csv_path)
+    if stored_checksum(connection, versions, operation.table_name, csv_key, tracked_environment) == checksum:
+        log.info(
+            "load_static_data %s from %s (environment %r): skipped, checksum unchanged",
+            table.name,
+            operation.csv_path,
+            tracked_environment,
+        )
         return UpsertResult(skipped=True)
 
     result = apply_static_data(
-        connection, table, operation.csv_path, operation.natural_keys, delete_missing=operation.delete_missing
+        connection,
+        table,
+        operation.csv_path,
+        operation.natural_keys,
+        delete_missing=operation.delete_missing,
+        environment_column=operation.environment_column,
+        environment=environment,
     )
-    record_load(connection, versions, operation.table_name, csv_key, checksum, result.rows)
+    record_load(
+        connection,
+        versions,
+        operation.table_name,
+        csv_key,
+        checksum,
+        result.rows,
+        environment=tracked_environment,
+    )
     return result
 
 
@@ -188,14 +264,24 @@ def apply_static_data(
     natural_keys: list[str],
     *,
     delete_missing: bool = False,
+    environment_column: str | None = None,
+    environment: str | None = None,
 ) -> UpsertResult:
     """Validate the CSV against ``table`` and upsert it; shared by the operation and directly testable.
 
     Knows nothing about checksums: the caller decides whether this runs at all.
     """
     header, raw_rows = load_csv_rows(csv_path)
+    if environment_column is not None and environment is not None:
+        if environment_column in natural_keys:
+            raise NaturalKeyError(
+                f"environment column {environment_column!r} cannot also be a natural key ({csv_path})"
+            )
+        header, raw_rows = select_environment_rows(header, raw_rows, environment_column, environment, csv_path)
     check_natural_keys_in_header(header, natural_keys, csv_path)
     check_columns(table, header, natural_keys)
+    # After filtering on purpose: the same natural key may appear once per environment, which is only a
+    # duplicate if two of those rows apply to the environment being loaded.
     check_unique_keys(raw_rows, natural_keys, csv_path)
     rows = [coerce_row(row, table) for row in raw_rows]
     result = upsert_rows(connection, table, rows, natural_keys)

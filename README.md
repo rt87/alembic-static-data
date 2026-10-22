@@ -58,6 +58,43 @@ missing from the CSV header, a duplicate natural key within the CSV, a CSV colum
 that cannot be converted, and offline (`--sql`) mode, which is unsupported because the operation must read the
 database.
 
+## Environment scoping
+
+One CSV can carry rows for several environments. Add a column naming them, and pass the environment on the
+command line:
+
+```csv
+code,name,decimals,_env
+EUR,Euro,2,
+JPY,Yen,0,
+XTS,Test currency,2,dev
+XXX,Sandbox,2,dev;staging
+```
+
+```python
+op.load_static_data("currency", CSV_PATH, natural_keys=["code"], environment_column="_env")
+```
+
+```bash
+alembic -x env=prod upgrade head     # loads EUR, JPY
+alembic -x env=dev upgrade head      # loads EUR, JPY, XTS, XXX
+```
+
+- A **blank cell means the row applies everywhere**; otherwise the cell is a `;`-separated list (`,` belongs
+  to the CSV), compared case-insensitively after stripping.
+- The column is **not a table column**: it is removed before the upsert, and it may not be a natural key.
+- The **same natural key may appear once per environment**, which is how you override a row for dev. Two rows
+  for the *selected* environment are still a duplicate-key error.
+- The environment comes from Alembic's own `-x` mechanism, read with `get_x_argument()`. The key defaults to
+  `env` and is configurable via `environment_key=`.
+- Rows for other environments are **ignored, not deleted** — scoping selects what to load, it does not
+  reconcile what is already there.
+- Configuring `environment_column=` with no environment available is an error (`EnvironmentNotSetError`),
+  not a reason to quietly load a subset.
+
+The environment is **part of the checksum key**, so loading the same file for a second environment is not
+skipped, and `op.forget_static_data(..., environment="dev")` forgets just that one.
+
 ## Worked example
 
 [`examples/reference_data`](examples/reference_data) is a complete, runnable Alembic project using this
@@ -92,6 +129,7 @@ repeatable-migration behaviour (issue #1). Notes on the design:
   separators normalised - so a relative path stays stable across checkouts, and the same CSV loaded into two
   tables is tracked separately.
 - `version_table_name=` renames the table; loads tracked in different tables do not see each other.
+- One row per `(table_name, csv_path, environment)`; see Environment scoping above.
 
 ### Downgrades
 
@@ -107,9 +145,9 @@ def downgrade() -> None:
     op.forget_static_data("currency", "data/currency.csv")
 ```
 
-`op.forget_static_data(table_name, csv_path=None, schema=None, *, version_table_name="static_data_version")`
-deletes only bookkeeping, never table data, and returns how many recorded loads it forgot. Omit `csv_path` to
-forget every file recorded for that table. It never creates the checksum table, and forgetting something that
+`op.forget_static_data(table_name, csv_path=None, schema=None, *, version_table_name="static_data_version",
+environment=None)` deletes only bookkeeping, never table data, and returns how many recorded loads it forgot.
+Omit `csv_path` to forget every file recorded for that table, and `environment` to forget every environment. It never creates the checksum table, and forgetting something that
 was never recorded returns `0` rather than failing.
 
 ### Autogenerate

@@ -23,5 +23,9 @@ class ValueCoercionError(StaticDataError):
     """A CSV cell could not be converted to the type of its target column."""
 
 
+class EnvironmentNotSetError(StaticDataError):
+    """An environment column was configured, but no environment was given to select rows with."""
+
+
 class OfflineModeError(StaticDataError):
     """Static data cannot be loaded in offline (--sql) mode."""
