@@ -98,6 +98,22 @@ def ensure_version_table(connection: sa.Connection, versions: sa.Table) -> None:
     versions.create(bind=connection, checkfirst=True)
 
 
+def version_table_exists(connection: sa.Connection, name: str, schema: str | None = None) -> bool:
+    """Whether the checksum table is already there, without creating it."""
+    return sa.inspect(connection).has_table(name, schema=schema)
+
+
+def forget_load(connection: sa.Connection, versions: sa.Table, table_name: str, csv_key: str | None = None) -> int:
+    """Delete tracking rows for ``table_name``, or just the one for ``csv_key``; returns how many.
+
+    The inverse of :func:`record_load`, so a ``downgrade()`` can make the next upgrade reload the file.
+    """
+    where = [versions.c.table_name == table_name]
+    if csv_key is not None:
+        where.append(versions.c.csv_path == csv_key)
+    return connection.execute(sa.delete(versions).where(*where)).rowcount
+
+
 def stored_checksum(connection: sa.Connection, versions: sa.Table, table_name: str, csv_key: str) -> str | None:
     """The checksum recorded for this ``(table, csv)`` pair, or ``None`` if it was never loaded."""
     stored = connection.execute(
