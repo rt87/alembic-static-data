@@ -15,6 +15,7 @@ from pathlib import Path
 import sqlalchemy as sa
 
 from alembic_static_data.errors import CsvFormatError
+from alembic_static_data.errors import StaticDataError
 
 DEFAULT_VERSION_TABLE = "static_data_version"
 
@@ -102,8 +103,22 @@ def version_table(name: str = DEFAULT_VERSION_TABLE, schema: str | None = None) 
 
 
 def ensure_version_table(connection: sa.Connection, versions: sa.Table) -> None:
-    """Create the checksum table if it is not there yet."""
+    """Create the checksum table if it is not there yet, and refuse a table of the wrong shape.
+
+    Before 1.0 this table's columns may change between releases and are deliberately **not** migrated. An
+    existing table written by an earlier version would otherwise fail deep inside a query with a bare
+    ``no such column``, which reads like the user's own database is broken rather than like bookkeeping that
+    can simply be dropped.
+    """
     versions.create(bind=connection, checkfirst=True)
+    existing = {column["name"] for column in sa.inspect(connection).get_columns(versions.name, schema=versions.schema)}
+    missing = [column.name for column in versions.columns if column.name not in existing]
+    if missing:
+        raise StaticDataError(
+            f"{versions.name!r} exists but is missing column(s) {missing}: it was written by an earlier "
+            f"version of alembic-static-data, and pre-1.0 releases do not migrate it. It holds bookkeeping "
+            f"only, no data of yours -> DROP TABLE {versions.name}; it is recreated on the next load"
+        )
 
 
 def version_table_exists(connection: sa.Connection, name: str, schema: str | None = None) -> bool:

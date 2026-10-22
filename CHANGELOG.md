@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-22 — PR #14: state the pre-1.0 policy that `static_data_version` is not migrated, and refuse a table of an older shape with an instruction instead of a bare `no such column`
+
 - 2026-10-22 — PR #13: refuse `delete_missing=True` together with `environment_column`, which silently deleted other environments' rows
 
 - 2026-10-22 — #11 → PR #12: refuse to load unless the table guarantees the `natural_keys` match at most one row (`require_unique=False` opts out), and accept a single natural key as a plain string
