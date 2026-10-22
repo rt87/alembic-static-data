@@ -53,7 +53,9 @@ Five decisions carry the design:
 
 **1. Keyed on natural keys, not surrogate ids.** The CSV names the business key (`code`), so the same file
 loads into databases whose autoincrement ids differ. Rows are matched on that key: missing ones are
-inserted, changed non-key columns are updated, identical rows are left alone.
+inserted, changed non-key columns are updated, identical rows are left alone. The table must *prove* that
+those columns are unique — a primary key, unique constraint or unique index covered by them — because
+otherwise one CSV row overwrites every matching table row while the result reports a single update.
 
 **2. Dialect-neutral by construction.** `SELECT` by key, then `INSERT` or `UPDATE` — no `ON CONFLICT`, no
 `MERGE`. One statement per row is slower than a bulk upsert and irrelevant at reference-data sizes; the

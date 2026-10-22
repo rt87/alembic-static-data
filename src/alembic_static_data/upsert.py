@@ -49,6 +49,43 @@ def check_columns(table: sa.Table, header: list[str], natural_keys: list[str]) -
         raise NaturalKeyError(f"Natural key column(s) {not_in_table} not found in table {table.name!r}")
 
 
+def unique_key_sets(table: sa.Table) -> list[list[str]]:
+    """Every column set ``table`` guarantees to be unique: its primary key, unique constraints, unique indexes."""
+    sets: list[list[str]] = []
+    if len(table.primary_key.columns) > 0:
+        sets.append([column.name for column in table.primary_key.columns])
+    sets.extend(
+        sorted(column.name for column in constraint.columns)
+        for constraint in table.constraints
+        if isinstance(constraint, sa.UniqueConstraint)
+    )
+    sets.extend(sorted(column.name for column in index.columns) for index in table.indexes if index.unique)
+    return sets
+
+
+def check_natural_keys_unique(table: sa.Table, natural_keys: list[str]) -> None:
+    """Raise unless ``table`` guarantees that ``natural_keys`` match at most one row.
+
+    The upsert's ``UPDATE ... WHERE <natural keys>`` hits *every* matching row, so without that guarantee a
+    single CSV row silently overwrites several table rows while the result counts one.
+
+    A unique key only has to be a **subset** of ``natural_keys``: uniqueness on fewer columns already implies
+    at most one match for more. The reverse does not hold, so a unique constraint on ``(code, name)`` does
+    not justify ``natural_keys=["code"]``.
+    """
+    wanted = set(natural_keys)
+    known = unique_key_sets(table)
+    if any(set(columns) <= wanted for columns in known):
+        return
+    primary_key = [column.name for column in table.primary_key.columns] or None
+    others = [columns for columns in known if columns != primary_key]
+    raise NaturalKeyError(
+        f"natural_keys {natural_keys} are not covered by a unique constraint on {table.name!r} "
+        f"(primary key: {primary_key or 'none'}, unique: {others or 'none'}) "
+        f"-> add a UniqueConstraint, or pass require_unique=False"
+    )
+
+
 def coerce_value(raw: str, column: sa.Column[Any]) -> Any:
     """Convert a CSV string to the Python type of ``column``; an empty cell becomes ``None``."""
     if raw == "":
