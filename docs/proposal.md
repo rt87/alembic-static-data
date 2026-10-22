@@ -4,8 +4,9 @@ A design proposal, written to be read by someone who has not seen this repositor
 what other tools do about it, the design this prototype settled on, and what is still open — including
 whether this belongs in Alembic at all.
 
-Status: prototype, private repository, nothing published. Nothing here has been discussed with the Alembic
-maintainers yet.
+Status: prototype (`0.1.0a1`), public repository, published to TestPyPI only — not to PyPI, and not under a
+name anyone should depend on yet. Nothing here has been raised with the Alembic maintainers; the section below
+collects what they have already said on their own, without being asked.
 
 ## The problem
 
@@ -32,9 +33,37 @@ The underlying gap: Alembic has no concept of a migration that *should* re-run w
 | **Flyway** | Repeatable migrations (`R__` prefix) re-run whenever their checksum changes | Ordered by filename; the SQL itself must tolerate re-runs, typically via natural keys and `ON CONFLICT` |
 | **Liquibase** | `loadData` change type plus `runOnChange` | Closest existing equivalent of this proposal |
 | **Atlas** | Declarative schema, lint for destructive changes, computed down-migrations | Forward-only by default; seed data not addressed |
-| **Alembic** | — | [sqlalchemy/alembic#620](https://github.com/sqlalchemy/alembic/issues/620): the maintainer's answer was that a small data migration is just a normal version file, and that there was no concept of a separate data feature |
+| **Alembic** | — | No seed-data concept; the maintainer has declined one three times since 2020 and points at third-party libraries instead. See the next section |
 
 Flyway's model is the one worth borrowing: *re-run when the content changes, never otherwise.*
+
+## What the maintainers have already said
+
+Read this before proposing anything, because it was all said unprompted and it is consistent. Checked 2026-10-22.
+
+- **[issue #620](https://github.com/sqlalchemy/alembic/issues/620)** (closed, last touched February 2020) — a
+  small data migration is just a normal version file; there is no concept of a separate data feature.
+- **[discussion #950](https://github.com/sqlalchemy/alembic/discussions/950)**, "Does alembic have repeatable
+  migrations?", asked with a link to Flyway's repeatable migrations — the exact question this document asks.
+  Answered the same day: *"this is not a first class feature of Alembic"*, with a pointer to the replaceable-objects
+  cookbook recipe and to [alembic-utils](https://github.com/olirice/alembic_utils) as the supported third-party
+  implementation of that pattern.
+- **[discussion #972](https://github.com/sqlalchemy/alembic/discussions/972)**, "Document how to do data
+  migrations", **still open**: *"I dont have any fixed method of doing data migrations with alembic ... in this
+  discussion if folks want to capture things that are safe to document (that is, won't mislead people into a poor /
+  rigid architecture ...) we can maybe figure something out."* A standing, unfulfilled invitation to supply
+  documentation content — and the only place where contributing here is asked for rather than unsolicited.
+- **[discussion #1872](https://github.com/sqlalchemy/alembic/discussions/1872)** (September 2026), on what the
+  `alembic.plugins` entry point is for: *"the 'plugins' system is decidedly not for dialect registration, it's for
+  things that extend Alembic itself, typically though not necessarily in a dialect agnostic way."* A
+  dialect-agnostic extension of Alembic itself is precisely what this is, so the entry point is being used as
+  intended. The same answer describes the plugin system's own history bluntly: the refactor was done for a CHECK
+  constraint plugin that *"failed immediately once we released and we basically had to almost completely revert it,
+  it's now useless cruft in the codebase that nobody uses."*
+
+Two conclusions follow. Asking core to adopt a data feature is pre-answered and would be the fifth time; and the
+one thing a plugin cannot settle for itself — whether the entry point is meant to carry this — is already
+answered yes, in public, in writing.
 
 ## The design
 
@@ -49,7 +78,7 @@ def downgrade() -> None:
     op.forget_static_data("currency", CSV_PATH)
 ```
 
-Five decisions carry the design:
+Six decisions carry the design:
 
 **1. Keyed on natural keys, not surrogate ids.** The CSV names the business key (`code`), so the same file
 loads into databases whose autoincrement ids differ. Rows are matched on that key: missing ones are
@@ -73,11 +102,11 @@ Alembic does offer a per-step hook (`EnvironmentContext.configure(on_version_app
 revision step rather than once per upgrade, so it does not give Flyway's "run repeatables at the end"
 semantics anyway.
 
-**5a. Environments select rows, not files.** Liquibase-style contexts in one reviewable file beat n copies
+**5. Environments select rows, not files.** Liquibase-style contexts in one reviewable file beat n copies
 of the same data: a diff shows every environment side by side, shared rows are written once, and the
 environment value rides on Alembic's existing `-x` mechanism rather than a new one.
 
-**5. The checksum describes the file, not the table.** A row edited by hand in the database stays edited
+**6. The checksum describes the file, not the table.** A row edited by hand in the database stays edited
 until the CSV changes. This keeps the rule explainable in one sentence and avoids a `COUNT(*)` on every
 load. The cost is an explicit `op.forget_static_data()` in `downgrade()`, since otherwise the recorded
 checksum outlives the data and a later upgrade skips the reload.
@@ -124,22 +153,31 @@ Arguments for proposing it upstream:
 - Doing it well requires knowledge of Alembic internals that a plugin has to reverse-engineer. This
   prototype had to handle three different `alembic.plugins` loader behaviours across one year of releases
   (1.17 has no plugin system; 1.18.0–1.20.0 iterate the entry point; 1.20.1+ expect a module), which a
-  core feature would simply not face.
+  core feature would simply not face. Note that the 1.18–1.20 behaviour was a bug rather than a contract: it
+  was reported as [#1873](https://github.com/sqlalchemy/alembic/issues/1873) and fixed within two days, in 1.20.1.
+  Supporting the broken releases anyway is this project's own choice, so it is not a question for anyone upstream.
 - The licence is MIT, matching Alembic and SQLAlchemy, so the code could move upstream without a
   relicensing step.
 
-A middle path: keep the plugin, and ask the maintainers only whether the *entry-point contract* and the
-`on_version_apply` hook are intended to support this kind of extension. That is a smaller question than
-"please adopt a data feature", and the answer shapes whether the plugin is standing on stable ground.
+The middle path this document used to propose — ask only whether the entry-point contract is meant to
+support this kind of extension — no longer has a question in it: #1872 answers it and #1873 settled the loader's
+shape. So the honest position is that this stays a plugin, and the remaining reason to approach the maintainers is
+not to ask permission but to offer something: a worked pattern for the documentation gap #972 is explicitly still
+looking for, and the fact that the plugin system now has a third-party user.
 
 ## Next steps
 
-1. Decide plugin vs. upstream proposal (this document's main open question).
-2. If upstream: open a **GitHub Discussion in the `Ideas` category** of `sqlalchemy/alembic`, linking this
-   document rather than restating it. Verified 2026-10-22: the project sets `blank_issues_enabled: false`
-   and its issue-template config routes feature proposals to Discussions/`Ideas` ("Use this for initial
-   discussion for new features and suggestions"), with Gitter (`gitter.im/sqlalchemy/community`) for quick
-   questions. Commenting on #620 would be the wrong channel twice over — it is closed and was last touched
-   in February 2020.
-3. If plugin: pick a public name, publish, and document the Alembic version matrix prominently, since the
-   loader behaviour changed twice within a year.
+1. **Do not open a new `Ideas` discussion proposing a data feature.** It has been declined in #620 and #950 and,
+   by implication, in #972, each time with the same reasoning. A fifth asking adds nothing and spends the
+   maintainers' patience on a question whose answer is already in writing.
+2. **Comment on the open [#972](https://github.com/sqlalchemy/alembic/discussions/972) instead**, which asked for
+   exactly this and never got it: a short description of the checksum-plus-natural-key pattern, the trade-offs that
+   make it safe (never delete by default, prove the keys are unique, dialect-neutral statements), and a link here,
+   framed as documentation content others can copy by hand rather than as a request. Mention the plugin as one
+   implementation, once, without pitching it.
+3. **Do that only after a real PyPI release.** The package currently exists on TestPyPI alone, so a link offers
+   readers something they cannot install, which makes the post an announcement of intent rather than a contribution.
+4. Keep documenting the Alembic version matrix prominently, since the loader behaviour changed twice within a year.
+
+For quick questions the project points at Gitter (`gitter.im/sqlalchemy/community`); its issue templates set
+`blank_issues_enabled: false` and route feature proposals to Discussions/`Ideas`. Verified 2026-10-22.
