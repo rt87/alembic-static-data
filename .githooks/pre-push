@@ -11,7 +11,10 @@ checked=0
 while read -r _local_ref local_sha _remote_ref remote_sha; do
     [ "$local_sha" = "$zero" ] && continue                      # branch deletion, nothing to inspect
     if [ "$remote_sha" = "$zero" ]; then
-        commits="$(git rev-list "$local_sha" --not --remotes)"   # new branch: everything not yet on a remote
+        # The branch does not exist on the remote yet, so check all of it. Excluding commits reachable from
+        # local remote-tracking refs looks cheaper, but those refs can be stale - pushing this history into
+        # a freshly created repository inspected exactly zero commits that way, which is how this was found.
+        commits="$(git rev-list "$local_sha")"
     else
         commits="$(git rev-list "$remote_sha..$local_sha")"
     fi
