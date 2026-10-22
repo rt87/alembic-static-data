@@ -1,0 +1,93 @@
+name: Release
+
+# Nothing here ever runs by itself. Publishing is a deliberate click, so that a stray tag push can never
+# put a release on an index - and so this costs no CI minutes until someone asks for a release.
+# The tag trigger below is left commented out on purpose; prefer running this from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Index to publish to
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
+  # push:
+  #   tags: ["v*"]
+
+# No token exists anywhere in this repository: the publish job authenticates to the index with a
+# short-lived OIDC identity (Trusted Publishing), which is why it is the only job allowed id-token: write.
+permissions: {}
+
+jobs:
+  build:
+    name: build and check the artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check the metadata the way the index will
+        run: uv run --with twine twine check dist/*
+
+      - name: Install the built wheel in a clean environment and use it
+        # Guards against publishing an artifact that cannot actually be imported: this is the one check the
+        # test suite structurally cannot do, since it runs against the editable install.
+        run: |
+          wheel="$(ls dist/*.whl)"
+          uv run --isolated --no-project --with "$wheel" python - <<'PY'
+          import importlib.metadata as md
+
+          from alembic.operations import Operations
+          from alembic.runtime import plugins
+
+          import alembic_static_data
+
+          dist = md.distribution("alembic-static-data")
+          assert "alembic_static_data" in plugins._all_plugins, "entry point not discovered"
+          assert hasattr(Operations, "load_static_data"), "load_static_data not registered"
+          assert hasattr(Operations, "forget_static_data"), "forget_static_data not registered"
+          assert hasattr(alembic_static_data, "exclude_from_autogenerate")
+          assert dist.locate_file("alembic_static_data/py.typed").is_file(), "py.typed missing"
+          print("ok:", dist.metadata["Name"], dist.version)
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish to ${{ inputs.target }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The only permission Trusted Publishing needs, and the reason this is a separate job: the build job
+      # above runs project code and must not be able to mint an identity token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@v1.14.3
+        with:
+          # TestPyPI and PyPI are separate Trusted Publishing configurations: a pending publisher on one
+          # does not authorise the other.
+          repository-url: >-
+            ${{ inputs.target == 'pypi'
+                && 'https://upload.pypi.org/legacy/'
+                || 'https://test.pypi.org/legacy/' }}
+          print-hash: true
