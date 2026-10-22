@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Alembic 1.17+](https://img.shields.io/badge/alembic-1.17%2B-ca4245)](#alembic-compatibility)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Coverage: 100%](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/rt87/alembic-static-data/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/rt87/alembic-static-data?logo=codecov&logoColor=white)](https://codecov.io/github/rt87/alembic-static-data)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-2a6db2)](https://mypy-lang.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000)](https://github.com/psf/black)
 [![License: MIT](https://img.shields.io/badge/license-MIT-750014)](LICENSE)
