@@ -81,6 +81,27 @@ repeatable-migration behaviour (issue #1). Notes on the design:
   tables is tracked separately.
 - `version_table_name=` renames the table; loads tracked in different tables do not see each other.
 
+### Downgrades
+
+The recorded checksum outlives the data, so a `downgrade()` that removes the rows must also forget the load,
+or the next upgrade sees a matching checksum and **skips the reload**:
+
+```python
+def upgrade() -> None:
+    op.load_static_data("currency", "data/currency.csv", natural_keys=["code"])
+
+
+def downgrade() -> None:
+    op.forget_static_data("currency", "data/currency.csv")
+```
+
+`op.forget_static_data(table_name, csv_path=None, schema=None, *, version_table_name="static_data_version")`
+deletes only bookkeeping, never table data, and returns how many recorded loads it forgot. Omit `csv_path` to
+forget every file recorded for that table. It never creates the checksum table, and forgetting something that
+was never recorded returns `0` rather than failing.
+
+### Autogenerate
+
 The checksum table exists in the database but not in your `target_metadata`, so
 `alembic revision --autogenerate` would otherwise propose dropping it. Exclude it in `env.py`:
 
@@ -150,8 +171,8 @@ uv run --with "alembic==1.17.0" pytest -q --no-cov -W error::DeprecationWarning
 
 ## Not done yet
 
-- No `downgrade` behaviour: the operation is not reversible by design, and a downgrade leaves the
-  `static_data_version` row in place.
+- The load is not reversible by design (it never deletes data), so a `downgrade()` that removes rows has to
+  call `op.forget_static_data()` itself - see Downgrades above.
 - Deleting rows is opt-in per call (`delete_missing=True`) and is skipped along with everything else when the
   checksum matches, so it is not a reconciliation mechanism.
 - No offline (`--sql`) support.

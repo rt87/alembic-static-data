@@ -18,10 +18,12 @@ from alembic_static_data.errors import OfflineModeError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
 from alembic_static_data.tracking import checksum_for
 from alembic_static_data.tracking import ensure_version_table
+from alembic_static_data.tracking import forget_load
 from alembic_static_data.tracking import record_load
 from alembic_static_data.tracking import stored_checksum
 from alembic_static_data.tracking import tracking_key
 from alembic_static_data.tracking import version_table
+from alembic_static_data.tracking import version_table_exists
 from alembic_static_data.upsert import UpsertResult
 from alembic_static_data.upsert import check_columns
 from alembic_static_data.upsert import coerce_row
@@ -89,6 +91,67 @@ class LoadStaticDataOp(MigrateOperation):
             version_table_name=version_table_name,
         )
         return cast("UpsertResult | None", operations.invoke(operation))
+
+
+@Operations.register_operation("forget_static_data")
+class ForgetStaticDataOp(MigrateOperation):
+    """Forget that a CSV was loaded, so the next ``load_static_data`` runs again. Touches no data."""
+
+    def __init__(
+        self,
+        table_name: str,
+        csv_path: str | Path | None = None,
+        schema: str | None = None,
+        *,
+        version_table_name: str = DEFAULT_VERSION_TABLE,
+    ) -> None:
+        self.table_name = table_name
+        self.csv_path = csv_path
+        self.schema = schema
+        self.version_table_name = version_table_name
+
+    @classmethod
+    def forget_static_data(
+        cls,
+        operations: Operations,
+        table_name: str,
+        csv_path: str | Path | None = None,
+        schema: str | None = None,
+        *,
+        version_table_name: str = DEFAULT_VERSION_TABLE,
+    ) -> int:
+        """Issue ``op.forget_static_data(table_name, csv_path)`` from a migration script.
+
+        The inverse of :meth:`LoadStaticDataOp.load_static_data`'s bookkeeping, for a ``downgrade()`` that
+        removes the data: without it the recorded checksum outlives the rows and the next upgrade skips the
+        load. Deletes only bookkeeping, never table data.
+
+        :param table_name: table whose recorded load should be forgotten.
+        :param csv_path: the file to forget; omit it to forget every file recorded for this table.
+        :param schema: optional schema, as passed to the load.
+        :param version_table_name: name of the checksum table, as passed to the load.
+        :return: how many recorded loads were forgotten; ``0`` if there was nothing to forget.
+        """
+        operation = cls(table_name, csv_path, schema, version_table_name=version_table_name)
+        return cast("int", operations.invoke(operation))
+
+
+@Operations.implementation_for(ForgetStaticDataOp)
+def forget_static_data(operations: Operations, operation: ForgetStaticDataOp) -> int:
+    if operations.migration_context.as_sql:
+        raise OfflineModeError("op.forget_static_data() needs a database connection and cannot run in offline mode")
+    connection = operations.get_bind()
+    # Deliberately does not create the table: a downgrade must not add one, and nothing is recorded anyway.
+    if not version_table_exists(connection, operation.version_table_name, operation.schema):
+        log.info(
+            "forget_static_data %s: no %s table, nothing to do", operation.table_name, operation.version_table_name
+        )
+        return 0
+    versions = version_table(operation.version_table_name, operation.schema)
+    csv_key = tracking_key(operation.csv_path) if operation.csv_path is not None else None
+    forgotten = forget_load(connection, versions, operation.table_name, csv_key)
+    log.info("forget_static_data %s from %s: forgot %d", operation.table_name, operation.csv_path, forgotten)
+    return forgotten
 
 
 @Operations.implementation_for(LoadStaticDataOp)
