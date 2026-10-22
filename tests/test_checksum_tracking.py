@@ -15,6 +15,7 @@ from freezegun import freeze_time
 
 from alembic_static_data import exclude_from_autogenerate
 from alembic_static_data.errors import CsvFormatError
+from alembic_static_data.errors import StaticDataError
 from alembic_static_data.tracking import DEFAULT_VERSION_TABLE
 from alembic_static_data.tracking import checksum_for
 from alembic_static_data.tracking import tracking_key
@@ -183,6 +184,26 @@ def test_missing_csv_file_raises_without_tracking(op, tmp_path) -> None:
     # Without the checksum pre-check, the CSV reader itself reports the missing file.
     with pytest.raises(CsvFormatError, match="CSV file not found"):
         op.load_static_data("currency", tmp_path / "nope.csv", ["code"], track_checksum=False)
+
+
+def test_an_older_tracking_table_is_refused_with_an_instruction(op, connection, write_csv) -> None:
+    """Pre-1.0 the bookkeeping table is not migrated; the error has to say so instead of failing cryptically."""
+    connection.execute(
+        sa.text(
+            f"CREATE TABLE {DEFAULT_VERSION_TABLE} ("
+            "table_name VARCHAR(128) NOT NULL, csv_path VARCHAR(512) NOT NULL, "
+            "checksum VARCHAR(64) NOT NULL, rows INTEGER NOT NULL, applied_at DATETIME NOT NULL, "
+            "PRIMARY KEY (table_name, csv_path))"
+        )
+    )
+
+    with pytest.raises(StaticDataError) as caught:
+        op.load_static_data("currency", write_csv(BASE), ["code"])
+
+    message = str(caught.value)
+    assert "missing column(s) ['environment']" in message
+    assert "pre-1.0 releases do not migrate it" in message
+    assert f"DROP TABLE {DEFAULT_VERSION_TABLE}" in message
 
 
 def test_applied_at_is_recorded_in_utc(op, connection, write_csv) -> None:

@@ -13,7 +13,12 @@ An [Alembic](https://alembic.sqlalchemy.org/) plugin that loads **static referen
 lookup tables, ...) from a CSV file in a migration, **idempotently**, keyed on **natural keys**. Alembic has no
 built-in support for repeatable/seed data; this fills that gap.
 
-Status: first prototype. One operation, with checksum-based rerun tracking.
+Status: first prototype (`0.1.0a1`). Not for production use.
+
+**Pre-1.0 the `static_data_version` table's own shape may change between releases, and it is deliberately
+not migrated.** If a release adds a column, a table written by an earlier one is refused with an error that
+says so; drop it and it is recreated on the next load. It holds bookkeeping only — never your data. After
+1.0 that stops being acceptable and any change there will be handled properly.
 
 ## Usage
 
