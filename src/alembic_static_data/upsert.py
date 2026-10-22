@@ -26,6 +26,14 @@ class UpsertResult:
     inserted: int = 0
     updated: int = 0
     unchanged: int = 0
+    deleted: int = 0
+    skipped: bool = False
+    """True when the load was skipped because the CSV's checksum matched the recorded one."""
+
+    @property
+    def rows(self) -> int:
+        """Rows read from the CSV, i.e. everything the upsert looked at."""
+        return self.inserted + self.updated + self.unchanged
 
 
 def check_columns(table: sa.Table, header: list[str], natural_keys: list[str]) -> None:
@@ -96,6 +104,27 @@ def build_update(table: sa.Table, natural_keys: list[str], row: dict[str, Any], 
 def changed_columns(existing: sa.RowMapping, row: dict[str, Any], natural_keys: list[str]) -> dict[str, Any]:
     """Non-key CSV columns whose value differs from the existing database row."""
     return {name: value for name, value in row.items() if name not in natural_keys and existing[name] != value}
+
+
+def delete_missing_rows(
+    connection: sa.Connection, table: sa.Table, rows: list[dict[str, Any]], natural_keys: list[str]
+) -> int:
+    """Delete table rows whose natural key is absent from ``rows``; returns how many were deleted.
+
+    Only reached when the caller passes ``delete_missing=True``: the default is still to never delete.
+    Dialect-neutral like the rest of this module: read the existing keys, then delete key by key.
+    """
+    wanted = {tuple(row[key] for key in natural_keys) for row in rows}
+    key_columns = [table.columns[key] for key in natural_keys]
+    deleted = 0
+    for existing_key in connection.execute(sa.select(*key_columns)).all():
+        if tuple(existing_key) in wanted:
+            continue
+        connection.execute(
+            sa.delete(table).where(*(column == value for column, value in zip(key_columns, existing_key, strict=True)))
+        )
+        deleted += 1
+    return deleted
 
 
 def upsert_rows(

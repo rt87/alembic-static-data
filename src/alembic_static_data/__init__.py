@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-__all__ = ["register_operations"]
+from alembic_static_data.tracking import exclude_from_autogenerate
+
+__all__ = ["exclude_from_autogenerate", "register_operations"]
 
 
 def register_operations() -> None:

@@ -21,6 +21,7 @@ dev = [
     "black[d]>=24",            # [d] adds blackd, the format server editors talk to
     "freezegun>=1.5",          # for the planned loaded_at/checksum work, which will need a frozen clock
     "mypy>=1.14",
+    "psycopg[binary]>=3.2",  # driver for the testcontainers Postgres run; unused on SQLite
     "pytest>=8",
     "pytest-asyncio>=0.24",    # unused today: the plugin is fully synchronous
     "pytest-cov>=5",
@@ -61,7 +62,7 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 # Test functions take pytest fixtures; annotating every one of them buys nothing. mypy patterns can only
 # wildcard whole dotted components, and tests/ is not a package, so new test modules go in this list.
-module = ["conftest", "test_units", "test_load_static_data"]
+module = ["conftest", "test_units", "test_load_static_data", "test_checksum_tracking", "test_postgres"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
