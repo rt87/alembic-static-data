@@ -1,0 +1,75 @@
+name: CI
+
+# DISABLED ON PURPOSE: CI minutes are spoken for until November 2026.
+# The automatic triggers below are commented out, so nothing runs without someone pressing
+# "Run workflow" (workflow_dispatch). To turn CI on, uncomment the push/pull_request block.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main, master]
+  # pull_request:
+  #   branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run black --check .
+      - run: uv run mypy
+
+  test:
+    name: py${{ matrix.python-version }} / alembic ${{ matrix.alembic }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Supported interpreters against whatever Alembic resolves to now.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        alembic: ["resolved"]
+        include:
+          # One job per Alembic plugin-loading regime; see "Alembic compatibility" in the README.
+          # 1.17.x has no plugin system, 1.18.0-1.20.0 iterate the entry point, 1.20.1+ take a module.
+          - python-version: "3.14"
+            alembic: "1.17.0"
+          - python-version: "3.14"
+            alembic: "1.18.0"
+          - python-version: "3.14"
+            alembic: "1.19.2"
+          - python-version: "3.14"
+            alembic: "1.20.0"
+          # Oldest supported combination of both.
+          - python-version: "3.11"
+            alembic: "1.17.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Test (resolved Alembic)
+        if: matrix.alembic == 'resolved'
+        run: uv run --frozen pytest -q -W error::DeprecationWarning
+
+      - name: Test (Alembic ${{ matrix.alembic }})
+        if: matrix.alembic != 'resolved'
+        run: uv run --frozen --with "alembic==${{ matrix.alembic }}" pytest -q --no-cov -W error::DeprecationWarning

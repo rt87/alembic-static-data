@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import cast
 
 import sqlalchemy as sa
 from alembic.operations import MigrateOperation
@@ -49,7 +50,7 @@ class LoadStaticDataOp(MigrateOperation):
         :param natural_keys: columns identifying a row; must be in the CSV header and in the table.
         :param schema: optional schema of the table.
         """
-        return operations.invoke(cls(table_name, csv_path, natural_keys, schema))
+        return cast("UpsertResult | None", operations.invoke(cls(table_name, csv_path, natural_keys, schema)))
 
 
 @Operations.implementation_for(LoadStaticDataOp)
