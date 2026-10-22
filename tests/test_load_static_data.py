@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable
+from types import ModuleType
+from typing import cast
 
 import pytest
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from alembic.runtime import plugins
 
+import alembic_static_data.plugin as plugin_module
+from alembic_static_data import register_operations
 from alembic_static_data.errors import ColumnMismatchError
 from alembic_static_data.errors import CsvFormatError
 from alembic_static_data.errors import NaturalKeyError
@@ -21,8 +25,32 @@ BASE = "code,name,decimals\nEUR,Euro,2\nJPY,Yen,0\n"
 
 
 def test_plugin_is_discovered_through_entry_point_and_registers_operation() -> None:
+    plugins = pytest.importorskip("alembic.runtime.plugins", reason="Alembic < 1.18 has no plugin system")
     assert "alembic_static_data" in plugins._all_plugins
     assert hasattr(Operations, "load_static_data")
+
+
+def test_register_operations_registers_the_operation_on_any_alembic_version() -> None:
+    register_operations()  # idempotent; the only registration path on Alembic < 1.18
+    assert hasattr(Operations, "load_static_data")
+
+
+def test_plugin_module_satisfies_both_entry_point_loader_forms() -> None:
+    # 1.20.1+ passes the module itself to setup(); 1.18.0-1.20.0 iterate it instead.
+    assert isinstance(plugin_module, ModuleType)
+    collected = list(cast("Iterable[ModuleType]", plugin_module))  # the iterability is not in ModuleType's type
+    assert collected == [plugin_module]
+    assert all(callable(module.setup) for module in collected)
+
+
+def test_plugin_setup_accepts_a_plugin_object_and_adds_no_comparators() -> None:
+    plugins = pytest.importorskip("alembic.runtime.plugins", reason="Alembic < 1.18 has no plugin system")
+    plugin = plugins.Plugin("alembic_static_data_test")
+    try:
+        plugin_module.setup(plugin)
+        assert not plugin.autogenerate_comparators._registry
+    finally:
+        plugin.remove()
 
 
 def test_inserts_new_rows(op, connection, write_csv) -> None:
@@ -202,7 +230,8 @@ def test_uncoercible_value_raises(op, write_csv, csv_text: str, message: str) ->
 def test_offline_mode_raises(tmp_path) -> None:
     context = MigrationContext.configure(dialect_name="sqlite", opts={"as_sql": True})
     with Operations.context(context) as operations, pytest.raises(OfflineModeError, match="offline mode"):
-        operations.load_static_data("currency", tmp_path / "x.csv", ["code"])
+        # Alembic registers the operation at runtime, so it is not an attribute mypy can see.
+        operations.load_static_data("currency", tmp_path / "x.csv", ["code"])  # type: ignore[attr-defined]
 
 
 def test_all_errors_share_a_base_class() -> None:

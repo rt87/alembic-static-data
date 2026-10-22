@@ -3,22 +3,33 @@ name = "alembic-static-data"
 version = "0.1.0"
 description = "Alembic plugin: idempotent loading of static reference data from CSV files, keyed on natural keys"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
-    "alembic>=1.20.1",
+    "alembic>=1.17",
     "sqlalchemy>=2.0",
 ]
 
 [project.entry-points."alembic.plugins"]
-# Target is a single module exposing `setup(plugin)`. Needs alembic>=1.20.1: 1.20.0 wrongly iterated the loaded
-# object (`for mod in entrypoint.load()`), fixed in 1.20.1 (alembic #1873). See alembic/runtime/plugins.py::_setup.
+# Target is a single module exposing `setup(plugin)`, as alembic>=1.20.1 documents. 1.18.0 (first release with
+# plugins) through 1.20.0 instead iterated the loaded object (`for mod in entrypoint.load()`, fixed by alembic
+# #1873), so the module is also iterable; see alembic_static_data/plugin.py::_PluginModule. Alembic <1.18 has no
+# plugin system and ignores this entry point: there, env.py calls `register_operations()`.
 alembic_static_data = "alembic_static_data.plugin"
 
 [dependency-groups]
 dev = [
+    "black[d]>=24",            # [d] adds blackd, the format server editors talk to
+    "freezegun>=1.5",          # for the planned loaded_at/checksum work, which will need a frozen clock
+    "mypy>=1.14",
     "pytest>=8",
+    "pytest-asyncio>=0.24",    # unused today: the plugin is fully synchronous
     "pytest-cov>=5",
+    "pytest-randomly>=3.15",   # registration lives in global state, so order independence is worth enforcing
+    "pytest-testmon>=2.1",     # run `--testmon --no-cov`: it and coverage both trace
+    "pytest-timeout>=2.3",     # keeps a hung container or connection from blocking a run forever
+    "pytest-xdist>=3.6",       # `-n auto`, worth having once Postgres containers are in play
     "ruff>=0.6",
+    "testcontainers[postgres]>=4.8",  # needs Docker, which this dev machine does not have yet
 ]
 
 [build-system]
@@ -27,6 +38,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alembic_static_data"]
+
+[tool.black]
+# Match ruff's line-length, or the two tools fight over every wrapped line.
+line-length = 120
 
 [tool.ruff]
 line-length = 120
@@ -39,6 +54,18 @@ select = ["E4", "E7", "E9", "F", "I"]
 force-single-line = true
 known-first-party = ["alembic_static_data"]
 
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# Test functions take pytest fixtures; annotating every one of them buys nothing. mypy patterns can only
+# wildcard whole dotted components, and tests/ is not a package, so new test modules go in this list.
+module = ["conftest", "test_units", "test_load_static_data"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=alembic_static_data --cov-report=term-missing"
+timeout = 60

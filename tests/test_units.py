@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import decimal
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -29,7 +30,7 @@ TABLE = sa.Table(
 )
 
 
-class OpaqueType(UserDefinedType):
+class OpaqueType(UserDefinedType[Any]):
     cache_ok = True
 
     @property

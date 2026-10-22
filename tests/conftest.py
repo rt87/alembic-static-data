@@ -3,11 +3,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+
+from alembic_static_data import register_operations
+
+# On Alembic < 1.18 nothing discovers the plugin, so register the operation the way such an env.py would.
+register_operations()
 
 
 @pytest.fixture
@@ -44,6 +50,6 @@ def write_csv(tmp_path: Path) -> Callable[..., Path]:
     return _write
 
 
-def fetch_all(connection: sa.Connection, order_by: str = "code") -> list[dict]:
+def fetch_all(connection: sa.Connection, order_by: str = "code") -> list[dict[str, Any]]:
     result = connection.execute(sa.text(f"SELECT * FROM currency ORDER BY {order_by}"))
     return [dict(row) for row in result.mappings()]
