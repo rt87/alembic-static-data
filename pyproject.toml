@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Alembic plugin: idempotent loading of static reference data from CSV files, keyed on natural keys"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "alembic>=1.17",
     "sqlalchemy>=2.0",
