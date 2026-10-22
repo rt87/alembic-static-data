@@ -47,13 +47,24 @@ track_checksum=True, version_table_name="static_data_version")`:
   an empty cell becomes `NULL`.
 - The returned `UpsertResult(inserted, updated, unchanged, deleted, skipped)` is also logged at INFO.
 - Uses plain SQLAlchemy Core (SELECT, then INSERT or UPDATE), no dialect-specific `ON CONFLICT`/`MERGE`.
-- `csv_path` is resolved relative to the working directory (or pass an absolute `Path`).
+- `csv_path` is handed straight to `open()`, so a relative path resolves against the **working directory**,
+  not the migration file. Build an absolute path from the revision's own `__file__` instead — see the
+  worked example; `env.py` cannot hold that constant, because Alembic loads it by path rather than as an
+  importable module.
 
 Failures raise subclasses of `alembic_static_data.errors.StaticDataError` with a message naming the file, line,
 column or key: a missing or empty CSV, a blank/duplicate header, a row with the wrong number of cells, a natural key
 missing from the CSV header, a duplicate natural key within the CSV, a CSV column the table does not have, a value
 that cannot be converted, and offline (`--sql`) mode, which is unsupported because the operation must read the
 database.
+
+## Worked example
+
+[`examples/reference_data`](examples/reference_data) is a complete, runnable Alembic project using this
+plugin — `alembic.ini`, `env.py`, two revisions and a CSV. `tests/test_example_project.py` drives it through
+`alembic.command`, so it is verified rather than decorative, and it is the only place the plugin is
+exercised the way a user meets it: entry-point discovery inside a real `env.py`, a real `--autogenerate`
+run, and `alembic downgrade base && alembic upgrade head` putting the data back.
 
 ## Rerun tracking
 
@@ -151,6 +162,7 @@ uv sync
 uv run ruff check .
 uv run black .       # formats at line-length 120; `blackd` is installed for editors
 uv run mypy          # strict, over src/ and tests/
+uv run vermin -t=3.11- --violations --no-tips src tests   # does the code really still fit 3.11?
 uv run pytest        # includes coverage; pytest-randomly shuffles order each run
 uv run pytest --testmon --no-cov   # fast inner loop: only tests affected by your edits
 uv run pytest -n auto --no-cov     # parallel

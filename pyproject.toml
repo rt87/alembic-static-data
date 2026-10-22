@@ -33,6 +33,7 @@ dev = [
     "pytest-xdist>=3.6",       # `-n auto`, worth having once Postgres containers are in play
     "ruff>=0.6",
     "testcontainers[postgres]>=4.8",  # needs Docker, which this dev machine does not have yet
+    "vermin>=1.6",
 ]
 
 [build-system]
@@ -51,7 +52,7 @@ line-length = 120
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
 
 [tool.ruff.lint.isort]
 force-single-line = true
@@ -64,7 +65,7 @@ files = ["src", "tests"]
 [[tool.mypy.overrides]]
 # Test functions take pytest fixtures; annotating every one of them buys nothing. mypy patterns can only
 # wildcard whole dotted components, and tests/ is not a package, so new test modules go in this list.
-module = ["conftest", "test_units", "test_load_static_data", "test_checksum_tracking", "test_postgres", "test_forget_static_data"]
+module = ["conftest", "test_units", "test_load_static_data", "test_checksum_tracking", "test_postgres", "test_forget_static_data", "test_example_project"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 

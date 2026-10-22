@@ -6,9 +6,9 @@ name: CI
 on:
   workflow_dispatch:
   # push:
-  #   branches: [main, master]
+  #   branches: [main]
   # pull_request:
-  #   branches: [main, master]
+  #   branches: [main]
 
 permissions:
   contents: read
@@ -34,6 +34,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run black --check .
       - run: uv run mypy
+      # Fails if anything in the code needs a newer Python than requires-python promises.
+      - run: uv run vermin -t=3.11- --violations --no-tips src tests
 
   test:
     name: py${{ matrix.python-version }} / alembic ${{ matrix.alembic }}
@@ -68,7 +70,9 @@ jobs:
 
       - name: Test (resolved Alembic)
         if: matrix.alembic == 'resolved'
-        run: uv run --frozen pytest -q -W error::DeprecationWarning
+        # The coverage gate lives here rather than in pyproject's addopts, so a local partial run
+        # (pytest -k ...) does not fail on coverage while CI still holds the line the badge claims.
+        run: uv run --frozen pytest -q -W error::DeprecationWarning --cov-fail-under=100
 
       - name: Test (Alembic ${{ matrix.alembic }})
         if: matrix.alembic != 'resolved'
