@@ -212,6 +212,29 @@ register_operations()
 That call is idempotent and harmless on every version, so it is safe to keep in an `env.py` that has to run
 against a range of Alembic releases.
 
+## Releasing
+
+`.github/workflows/release.yml` builds, checks and publishes — **manually only**, from the Actions tab, with
+the index as an input (`testpypi` or `pypi`). The tag trigger is left commented out so a stray tag can never
+publish, and so it costs no CI minutes until a release is actually wanted.
+
+It uses **Trusted Publishing**: no API token exists anywhere in this repository or in its secrets. The
+publish job authenticates with a short-lived OIDC identity, which is why it is the only job granted
+`id-token: write` — the build job, which runs project code, cannot mint one.
+
+Three things must match the *pending publisher* configured on the index, or the upload is rejected:
+
+| | value |
+| --- | --- |
+| Repository | `rt87/alembic-static-data` |
+| Workflow filename | `release.yml` |
+| Environment | *(none)* — add `environment:` to the publish job if one was configured |
+
+TestPyPI and PyPI are **separate** configurations; a pending publisher on one does not authorise the other.
+Before the first upload the build job installs the freshly built wheel into a clean environment and asserts
+that Alembic discovers the plugin and that `py.typed` is packaged — the one check the test suite cannot do,
+since it runs against the editable install.
+
 ## Development
 
 ```bash
