@@ -1,0 +1,30 @@
+# Codecov is the *reporting* side of coverage; the line itself is enforced by --cov-fail-under=100 in
+# .github/workflows/ci.yml, which fails the build before any upload happens. These settings only make
+# Codecov's own statuses agree with that gate instead of inventing a second, looser one.
+coverage:
+  precision: 2
+  round: down
+  range: "90...100"
+  status:
+    project:
+      default:
+        target: 100%
+        threshold: 0%
+    patch:
+      default:
+        target: 100%
+        threshold: 0%
+
+# Four jobs upload the same suite under one flag each; wait for all of them before judging a commit.
+codecov:
+  require_ci_to_pass: true
+  notify:
+    after_n_builds: 4
+
+comment:
+  layout: "condensed_header, condensed_files"
+  require_changes: true
+
+ignore:
+  - "tests/**"
+  - "examples/**"

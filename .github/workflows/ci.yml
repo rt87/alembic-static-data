@@ -41,6 +41,12 @@ jobs:
     name: py${{ matrix.python-version }} / alembic ${{ matrix.alembic }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # For Codecov's OIDC upload, so there is no CODECOV_TOKEN secret to manage or leak. The token is
+      # minted for the audience https://codecov.io and can do nothing else; note this is still a job that
+      # runs project code, which is why release.yml deliberately keeps id-token away from its build job.
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -71,12 +77,26 @@ jobs:
       - name: Test (resolved Alembic)
         if: matrix.alembic == 'resolved'
         # The coverage gate lives here rather than in pyproject's addopts, so a local partial run
-        # (pytest -k ...) does not fail on coverage while CI still holds the line the badge claims. It runs
-        # on every supported Python, so a regression cannot hide behind one interpreter.
-        run: uv run --frozen pytest -q -W error::DeprecationWarning --cov-fail-under=100
+        # (pytest -k ...) does not fail on coverage while CI still holds the line. It runs on every supported
+        # Python, so a regression cannot hide behind one interpreter. The XML report is for Codecov, which
+        # reports the number rather than enforcing it - this gate is what enforces it.
+        run: uv run --frozen pytest -q -W error::DeprecationWarning --cov-fail-under=100 --cov-report=xml
 
       - name: Test (Alembic ${{ matrix.alembic }})
         if: matrix.alembic != 'resolved'
         # No coverage gate here on purpose: below Alembic 1.18 two plugin-system tests skip themselves, so
         # the measured percentage is not comparable. The gate lives on the jobs that run the whole suite.
         run: uv run --frozen --with "alembic==${{ matrix.alembic }}" pytest -q --no-cov -W error::DeprecationWarning
+
+      - name: Upload coverage to Codecov
+        if: matrix.alembic == 'resolved'
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          files: coverage.xml
+          # One flag per interpreter, so Codecov merges the four reports instead of overwriting one with
+          # the next, and a gap on a single Python stays visible.
+          flags: py${{ matrix.python-version }}
+          use_oidc: true
+          # Reporting must not be able to fail the build: the gate above already enforces the line, and a
+          # Codecov outage or a fork PR (where OIDC is unavailable) says nothing about this code.
+          fail_ci_if_error: false
